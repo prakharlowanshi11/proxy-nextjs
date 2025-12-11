@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   FeatureDetails,
   FeatureTypeEntity,
@@ -48,6 +48,8 @@ type ServiceFormState = {
   requirements: FieldGroupState;
   configurations: FieldGroupState;
 };
+
+type FieldGroupKey = "requirements" | "configurations";
 
 const stepLabels = ["Select Block", "Name Block", "Configure Services", "Authorization"];
 const NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_\s]+$/;
@@ -200,6 +202,25 @@ const getSelectOptions = (config: FieldConfig) => {
   return [];
 };
 
+const formatFieldValue = (value: unknown) => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "object" && "toString" in (value as { toString?: () => string | null })) {
+    const toStringFn = (value as { toString?: () => string | null }).toString;
+    if (typeof toStringFn === "function") {
+      return toStringFn.call(value) ?? "";
+    }
+  }
+  return "";
+};
+
 const buildFieldGroupState = (group?: Record<string, FieldConfig>, previous?: FieldGroupState): FieldGroupState => {
   if (!group) {
     return {};
@@ -219,9 +240,7 @@ const buildFieldGroupState = (group?: Record<string, FieldConfig>, previous?: Fi
       };
     } else {
       acc[key] = {
-        value:
-          prior?.value ??
-          (typeof config?.value === "string" ? (config.value as string) : config?.value?.toString?.() ?? ""),
+        value: prior?.value ?? formatFieldValue(config?.value),
         chips: [],
         file: config?.type === "readFile" ? null : undefined,
         touched: false,
@@ -294,7 +313,7 @@ async function mapFieldGroupPayload(
   return Object.fromEntries(entries);
 }
 
-export default function CreateBlockPage() {
+function CreateBlockPageContent() {
   const searchParams = useSearchParams();
   const editingFeatureIdParam = searchParams.get("featureId");
   const editingFeatureId: string | null = editingFeatureIdParam?.trim() || null;
@@ -561,7 +580,12 @@ export default function CreateBlockPage() {
       ? rawConfigs
       : Object.values((rawConfigs as Record<string, unknown>) ?? {});
     const storedConfigs = new Map(
-      (normalizedConfigs as Array<{ service_id: number }>)
+      (normalizedConfigs as Array<{
+        service_id: number;
+        is_enable?: boolean;
+        requirements?: Record<string, unknown>;
+        configurations?: { fields?: Record<string, unknown> };
+      }>)
         .filter((entry) => typeof entry?.service_id === "number")
         .map((entry) => [entry.service_id, entry])
     );
@@ -586,7 +610,7 @@ export default function CreateBlockPage() {
   }, [featureDetails, isEditMode, selectedMethod]);
 
   const updateFieldState = useCallback(
-    (serviceId: number, group: keyof ServiceFormState, key: string, updater: Partial<FieldState>) => {
+    (serviceId: number, group: FieldGroupKey, key: string, updater: Partial<FieldState>) => {
       setServiceState((prev) => {
         const service = prev[serviceId];
         if (!service) {
@@ -623,7 +647,7 @@ export default function CreateBlockPage() {
         return true;
       }
       let valid = true;
-      const checkGroup = (group?: Record<string, FieldConfig>, stateGroup?: FieldGroupState, groupKey?: keyof ServiceFormState) => {
+      const checkGroup = (group?: Record<string, FieldConfig>, stateGroup?: FieldGroupState, groupKey?: FieldGroupKey) => {
         if (!group || !stateGroup || !groupKey) {
           return;
         }
@@ -934,7 +958,7 @@ export default function CreateBlockPage() {
 
   const renderField = (
     serviceId: number,
-    group: keyof ServiceFormState,
+    group: FieldGroupKey,
     fieldKey: string,
     config: FieldConfig,
     fieldState: FieldState
@@ -1658,5 +1682,13 @@ export default function CreateBlockPage() {
         {submitSuccess && <p className="text-sm text-[#0f9d58]">{submitSuccess}</p>}
       </div>
     </div>
+  );
+}
+
+export default function CreateBlockPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loading...</div>}>
+      <CreateBlockPageContent />
+    </Suspense>
   );
 }

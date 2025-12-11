@@ -285,7 +285,10 @@ export default function UsersPage() {
     try {
       const response = await FeaturesApi.details(managementFeatureId);
       setFeatureDetails(response.data ?? null);
-      const cRoles = (response.data?.extra_configurations as Record<string, unknown>)?.c_roles ?? {};
+      const cRoles = ((response.data?.extra_configurations as Record<string, unknown>)?.c_roles ?? {}) as {
+        default_creator_role?: unknown;
+        default_member_role?: unknown;
+      };
       setDefaultRoles({
         creator: cRoles?.default_creator_role ? String(cRoles.default_creator_role) : "",
         member: cRoles?.default_member_role ? String(cRoles.default_member_role) : "",
@@ -1047,7 +1050,10 @@ export default function UsersPage() {
         <button
           className="rounded-full border border-[#d5d9dc] px-6 py-2 text-sm"
           onClick={() => {
-            const cRoles = (featureDetails?.extra_configurations as Record<string, unknown>)?.c_roles ?? {};
+            const cRoles = ((featureDetails?.extra_configurations as Record<string, unknown>)?.c_roles ?? {}) as {
+              default_creator_role?: unknown;
+              default_member_role?: unknown;
+            };
             setDefaultRoles({
               creator: cRoles?.default_creator_role ? String(cRoles.default_creator_role) : "",
               member: cRoles?.default_member_role ? String(cRoles.default_member_role) : "",

@@ -13,8 +13,12 @@ type FirebaseAuthCredential = {
   user?: FirebaseUser;
 };
 
+type GoogleAuthProvider = {
+  setCustomParameters: (params: { prompt?: string }) => void;
+};
+
 type FirebaseAuth = {
-  signInWithPopup: (provider: unknown) => Promise<FirebaseAuthCredential>;
+  signInWithPopup: (provider: GoogleAuthProvider) => Promise<FirebaseAuthCredential>;
   signOut: () => Promise<void>;
   onAuthStateChanged: (callback: (user: FirebaseUser | null) => void) => () => void;
   currentUser: FirebaseUser | null;
@@ -23,7 +27,7 @@ type FirebaseAuth = {
 type FirebaseNamespace = {
   auth: {
     (): FirebaseAuth;
-    GoogleAuthProvider: new () => unknown;
+    GoogleAuthProvider: new () => GoogleAuthProvider;
   };
   apps?: Array<unknown>;
   initializeApp: (config: typeof firebaseConfig) => void;
