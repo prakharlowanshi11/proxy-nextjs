@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { DevToolsProvider } from "@/lib/providers/DevToolsProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -9,8 +10,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "SAAR Proxy Console",
-  description: "Next.js experience for managing SAAR proxy traffic and features.",
+  title: "Proxy Auth - OTP Provider",
+  description: "Next.js experience for proxy authentication and OTP verification.",
 };
 
 export default function RootLayout({
@@ -21,7 +22,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased bg-app-surface text-body`}>
-        {children}
+        <DevToolsProvider maxAge={25} serialize={true}>
+          {children}
+        </DevToolsProvider>
       </body>
     </html>
   );

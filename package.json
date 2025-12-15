@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "start:proxy-auth": "npm --prefix proxy-auth run start:proxy-auth"
+    "start:proxy-auth": "npm run dev",
+    "test:proxy-auth": "npm run dev",
+    "dev:proxy-auth": "npm run dev -- --port 3001",
+    "preview:proxy-auth": "npm run build && npm run start"
   },
   "dependencies": {
     "next": "16.0.7",
