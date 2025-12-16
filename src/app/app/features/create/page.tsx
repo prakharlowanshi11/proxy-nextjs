@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   FeatureDetails,
@@ -11,105 +11,30 @@ import type {
   MethodServiceConfiguration,
 } from "@/lib/api";
 import { FeaturesApi } from "@/lib/api";
+import type { FieldConfig, FieldState, FieldGroupState, ServiceFormState, FieldGroupKey, EditTab } from "@/types";
+import {
+  STEP_LABELS,
+  NAME_REGEX,
+  NAME_MIN_LENGTH,
+  NAME_MAX_LENGTH,
+  THEME_OPTIONS,
+  EDIT_TABS,
+  FEATURE_SERVICE_IDS,
+  DEFAULT_PROXY_SCRIPT_BASE_URL,
+  PROXY_AUTH_SCRIPT_ATTR,
+  REDIRECT_FIELD_PATTERNS,
+  getProxyAuthScriptSrc,
+  buildProxyAuthScript,
+  buildDemoDivSnippet,
+} from "@/constants";
 
-type FieldConfig = Record<string, unknown> & {
-  type?: string;
-  label?: string;
-  placeholder?: string;
-  is_required?: boolean;
-  regex?: string;
-  hint?: string;
-  info?: string;
-  value?: string;
-  delimiter?: string;
-  allowed_types?: string;
-  source?: string[];
-  sourceFieldLabel?: string[];
-  sourceFieldValue?: string[];
-  filter_conditions?: Array<{
-    when?: { field?: string; equals?: string };
-    allowed_values?: string[];
-    hide?: boolean;
-  }>;
+const formatMethodType = (method?: MethodEntity, featureId?: number | null) => {
+  // If feature_id is 1, always use "authorization"
+  if (featureId === 1) {
+    return "authorization";
+  }
+  return (method?.service_use || method?.name || "authorization").toLowerCase().replace(/\s+/g, "-");
 };
-
-type FieldState = {
-  value: string;
-  chips: string[];
-  file?: File | null;
-  touched: boolean;
-  error: string | null;
-};
-
-type FieldGroupState = Record<string, FieldState>;
-
-type ServiceFormState = {
-  isEnabled: boolean;
-  requirements: FieldGroupState;
-  configurations: FieldGroupState;
-};
-
-type FieldGroupKey = "requirements" | "configurations";
-
-const stepLabels = ["Select Block", "Name Block", "Configure Services", "Authorization"];
-const NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_\s]+$/;
-const NAME_MIN_LENGTH = 3;
-const NAME_MAX_LENGTH = 60;
-
-const themeOptions = [
-  { label: "System", value: "system" },
-  { label: "Light", value: "light" },
-  { label: "Dark", value: "dark" },
-];
-
-const editTabs = [
-  { id: "service", label: "Service" },
-  { id: "settings", label: "Settings" },
-  { id: "design", label: "Design & Code" },
-] as const;
-
-type EditTab = (typeof editTabs)[number]["id"];
-
-const FeatureServiceIds = {
-  Msg91OtpService: 6,
-  GoogleAuthentication: 7,
-  PasswordAuthentication: 9,
-} as const;
-
-const DEFAULT_PROXY_SCRIPT_BASE_URL =
-  process.env.NEXT_PUBLIC_PROXY_SCRIPT_BASE_URL ?? process.env.NEXT_PUBLIC_PROXY_SERVER ?? "https://test.proxy.msg91.com";
-
-const PROXY_AUTH_SCRIPT_ATTR = "data-proxy-auth-script";
-
-const getProxyAuthScriptSrc = (timestamp?: number) =>
-  `${DEFAULT_PROXY_SCRIPT_BASE_URL.replace(/\/$/, "")}/assets/proxy-auth/proxy-auth.js${timestamp ? `?time=${timestamp}` : ""}`;
-
-const buildProxyAuthScript = (referenceId?: string | null, type?: string | null) => {
-  const sanitizedReference = referenceId?.trim() || "<reference_id>";
-  const normalizedType = (type?.trim() || "authorization").replace(/\s+/g, "-").toLowerCase();
-  const scriptUrl = getProxyAuthScriptSrc();
-  return `<script type="text/javascript">
-    var configuration = {
-        referenceId: '${sanitizedReference}',
-        type: '${normalizedType}',
-        success: (data) => {
-            console.log('success response', data);
-        },
-        failure: (error) => {
-            console.log('failure reason', error);
-        },
-    };
-</script>
-<script
-    type="text/javascript"
-    onload="initVerification(configuration)"
-    src="${scriptUrl}"
-></script>`;
-};
-
-const buildDemoDivSnippet = (referenceId?: string | null) => `<div id="${referenceId?.trim() || "proxy-auth-button"}"></div>`;
-
-const formatMethodType = (method?: MethodEntity) => (method?.service_use || method?.name || "authorization").toLowerCase().replace(/\s+/g, "-");
 
 const sanitizeStringArray = (value?: string, delimiter = ",") => {
   if (!value) {
@@ -123,13 +48,24 @@ const sanitizeStringArray = (value?: string, delimiter = ",") => {
 
 const toClonedConfig = (config: FieldConfig) => JSON.parse(JSON.stringify(config ?? {}));
 
-const readStoredFieldValue = (entry: unknown) => {
-  if (!entry) {
+const readStoredFieldValue = (entry: unknown): unknown => {
+  if (entry === undefined || entry === null) {
     return undefined;
   }
-  if (typeof entry === "object" && "value" in (entry as Record<string, unknown>)) {
-    return (entry as Record<string, unknown>).value;
+  // If it's a primitive, return as is
+  if (typeof entry !== "object") {
+    return entry;
   }
+  const obj = entry as Record<string, unknown>;
+  // If it has a 'value' property, extract it
+  if ("value" in obj) {
+    return obj.value;
+  }
+  // If it's an array, return as is (for chip lists)
+  if (Array.isArray(entry)) {
+    return entry;
+  }
+  // Otherwise return the object itself
   return entry;
 };
 
@@ -142,15 +78,27 @@ const hydrateGroupState = (
   }
   return Object.entries(definitions).reduce<FieldGroupState>((acc, [key, config]) => {
     const raw = stored ? readStoredFieldValue(stored[key]) : undefined;
+    // Get default value from config if no stored value
+    const defaultValue = formatFieldValue(config?.value);
+    
     if (config.type === "chipList") {
       const delimiter = config.delimiter ?? " ";
-      const chips = Array.isArray(raw)
-        ? (raw as unknown[]).map((item) => String(item)).filter(Boolean)
-        : typeof raw === "string"
-        ? sanitizeStringArray(raw, delimiter)
-        : raw !== undefined && raw !== null
-        ? [String(raw)]
-        : [];
+      let chips: string[] = [];
+      
+      if (Array.isArray(raw)) {
+        // Handle array of values
+        chips = raw.map((item) => String(item)).filter(Boolean);
+      } else if (typeof raw === "string" && raw.trim()) {
+        // Handle string with delimiter
+        chips = sanitizeStringArray(raw, delimiter);
+      } else if (raw !== undefined && raw !== null && raw !== "") {
+        // Handle single value
+        chips = [String(raw)];
+      } else if (defaultValue) {
+        // Fall back to default value from config
+        chips = sanitizeStringArray(defaultValue, delimiter);
+      }
+      
       acc[key] = {
         value: "",
         chips,
@@ -159,15 +107,16 @@ const hydrateGroupState = (
       };
     } else if (config.type === "readFile") {
       acc[key] = {
-        value: raw ? String(raw) : "",
+        value: raw ? String(raw) : defaultValue,
         chips: [],
         file: null,
         touched: false,
         error: null,
       };
     } else {
+      // Use stored value if available, otherwise fall back to config default
       acc[key] = {
-        value: raw !== undefined && raw !== null ? String(raw) : "",
+        value: raw !== undefined && raw !== null ? String(raw) : defaultValue,
         chips: [],
         touched: false,
         error: null,
@@ -314,6 +263,7 @@ async function mapFieldGroupPayload(
 }
 
 function CreateBlockPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const editingFeatureIdParam = searchParams.get("featureId");
   const editingFeatureId: string | null = editingFeatureIdParam?.trim() || null;
@@ -343,7 +293,7 @@ function CreateBlockPageContent() {
   const [serviceState, setServiceState] = useState<Record<number, ServiceFormState>>({});
   const [authorizationKey, setAuthorizationKey] = useState("");
   const [sessionTime, setSessionTime] = useState("3600");
-  const [theme, setTheme] = useState(themeOptions[0].value);
+  const [theme, setTheme] = useState(THEME_OPTIONS[0].value);
   const [allowRegistrations, setAllowRegistrations] = useState(false);
   const [activeEditTab, setActiveEditTab] = useState<EditTab>("service");
   const [previewLayout, setPreviewLayout] = useState<"top" | "bottom">("top");
@@ -357,7 +307,7 @@ function CreateBlockPageContent() {
   const isServiceEnabled = useCallback(
     (service: MethodService) => {
       const formState = serviceState[service.service_id];
-      return formState?.isEnabled ?? service.is_enable ?? true;
+      return formState?.isEnabled ?? service.is_enable ?? false;
     },
     [serviceState]
   );
@@ -368,27 +318,30 @@ function CreateBlockPageContent() {
   );
 
   const passwordServicesEnabled = useMemo(
-    () => enabledServices.some((service) => service.service_id === FeatureServiceIds.PasswordAuthentication),
+    () => enabledServices.some((service) => service.service_id === FEATURE_SERVICE_IDS.PasswordAuthentication),
     [enabledServices]
   );
 
   const alternativeServices = useMemo(
-    () => enabledServices.filter((service) => service.service_id !== FeatureServiceIds.PasswordAuthentication),
+    () => enabledServices.filter((service) => service.service_id !== FEATURE_SERVICE_IDS.PasswordAuthentication),
     [enabledServices]
   );
-
-  const scriptSnippet = useMemo(
-    () => buildProxyAuthScript(featureDetails?.reference_id, formatMethodType(selectedMethod)),
-    [featureDetails?.reference_id, selectedMethod]
-  );
-
-  const demoDivSnippet = useMemo(() => buildDemoDivSnippet(featureDetails?.reference_id), [featureDetails?.reference_id]);
-  const currentReferenceId = featureDetails?.reference_id ?? null;
-  const featureMethod = featureDetails?.method;
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [createdFeatureData, setCreatedFeatureData] = useState<{ id: number; reference_id: string } | null>(null);
+
+  const effectiveReferenceId = createdFeatureData?.reference_id ?? featureDetails?.reference_id ?? null;
+  
+  const scriptSnippet = useMemo(
+    () => buildProxyAuthScript(effectiveReferenceId ?? (blockName.trim().toLowerCase().replace(/\s+/g, "_") || null), formatMethodType(selectedMethod, selectedFeatureId ?? featureDetails?.feature_id)),
+    [effectiveReferenceId, blockName, selectedMethod, selectedFeatureId, featureDetails?.feature_id]
+  );
+
+  const demoDivSnippet = useMemo(() => buildDemoDivSnippet(effectiveReferenceId ?? (blockName.trim().toLowerCase().replace(/\s+/g, "_") || null)), [effectiveReferenceId, blockName]);
+  const currentReferenceId = effectiveReferenceId;
+  const featureMethod = featureDetails?.method;
 
   useEffect(() => {
     setHasHydratedFromDetails(false);
@@ -500,12 +453,19 @@ function CreateBlockPageContent() {
       setServiceState({});
       return;
     }
+    // In edit mode, let the hydration effect handle the state
+    // This effect only sets defaults for new block creation
+    if (isEditMode && featureDetails) {
+      // Only set authorization key if not already set
+      setAuthorizationKey((prev) => prev || selectedMethod.authorization_format?.key || "");
+      return;
+    }
     setServiceState((previous) => {
       const next: Record<number, ServiceFormState> = {};
       selectedMethod.method_services?.forEach((service) => {
         const prior = previous[service.service_id];
         next[service.service_id] = {
-          isEnabled: prior?.isEnabled ?? service.is_enable ?? true,
+          isEnabled: prior?.isEnabled ?? service.is_enable ?? false,
           requirements: buildFieldGroupState(service.requirements as Record<string, FieldConfig>, prior?.requirements),
           configurations: buildFieldGroupState(
             (service.configurations as MethodServiceConfiguration | undefined)?.fields as Record<string, FieldConfig>,
@@ -516,7 +476,7 @@ function CreateBlockPageContent() {
       return next;
     });
     setAuthorizationKey((prev) => prev || selectedMethod.authorization_format?.key || "");
-  }, [selectedMethod]);
+  }, [selectedMethod, isEditMode, featureDetails]);
 
   useEffect(() => {
     if (!isEditMode || !editingFeatureId) {
@@ -543,7 +503,7 @@ function CreateBlockPageContent() {
           setAuthorizationKey(details.authorization_format?.key ?? "");
           setSessionTime(String(details.session_time ?? 3600));
           const extra = (details.extra_configurations ?? {}) as Record<string, unknown>;
-          setTheme(typeof extra.theme === "string" ? extra.theme : themeOptions[0].value);
+          setTheme(typeof extra.theme === "string" ? extra.theme : THEME_OPTIONS[0].value);
           const allowFlag =
             typeof extra.allowNewUserRegistration === "boolean"
               ? extra.allowNewUserRegistration
@@ -584,7 +544,7 @@ function CreateBlockPageContent() {
         service_id: number;
         is_enable?: boolean;
         requirements?: Record<string, unknown>;
-        configurations?: { fields?: Record<string, unknown> };
+        configurations?: { fields?: Record<string, unknown> } | Record<string, unknown>;
       }>)
         .filter((entry) => typeof entry?.service_id === "number")
         .map((entry) => [entry.service_id, entry])
@@ -593,15 +553,33 @@ function CreateBlockPageContent() {
       const next: Record<number, ServiceFormState> = {};
       selectedMethod.method_services?.forEach((service) => {
         const stored = storedConfigs.get(service.service_id);
+        
+        // Handle stored requirements - might have different structures
+        const storedRequirements = stored?.requirements as Record<string, unknown> | undefined;
+        
+        // Handle stored configurations - might be in `fields` or directly in configurations
+        const storedConfigurations = stored?.configurations as Record<string, unknown> | undefined;
+        let storedConfigFields: Record<string, unknown> | undefined;
+        
+        if (storedConfigurations) {
+          // Check if fields exist as a property
+          if (storedConfigurations.fields && typeof storedConfigurations.fields === "object") {
+            storedConfigFields = storedConfigurations.fields as Record<string, unknown>;
+          } else {
+            // Use configurations directly (might have field values at root level)
+            storedConfigFields = storedConfigurations;
+          }
+        }
+        
         next[service.service_id] = {
-          isEnabled: stored?.is_enable ?? service.is_enable ?? true,
+          isEnabled: stored?.is_enable ?? service.is_enable ?? false,
           requirements: hydrateGroupState(
             service.requirements as Record<string, FieldConfig>,
-            stored?.requirements as Record<string, unknown>
+            storedRequirements
           ),
           configurations: hydrateGroupState(
             (service.configurations as MethodServiceConfiguration | undefined)?.fields as Record<string, FieldConfig>,
-            (stored?.configurations as { fields?: Record<string, unknown> })?.fields
+            storedConfigFields
           ),
         };
       });
@@ -682,9 +660,25 @@ function CreateBlockPageContent() {
       if (!services.length) {
         return true;
       }
-      return services.every((service) => evaluateServiceFields(service.service_id, { markTouched }));
+
+      // For edit mode, validate only ENABLED services
+      if (isEditMode) {
+        const enabledServicesToValidate = services.filter(
+          (service) => serviceState[service.service_id]?.isEnabled
+        );
+        // If no services are enabled, validation passes
+        if (!enabledServicesToValidate.length) {
+          return true;
+        }
+        return enabledServicesToValidate.every((service) => 
+          evaluateServiceFields(service.service_id, { markTouched })
+        );
+      }
+
+      // For add mode (authorization block creation), no validation required
+      return true;
     },
-    [evaluateServiceFields, selectedMethod?.method_services]
+    [evaluateServiceFields, isEditMode, selectedMethod?.method_services, serviceState]
   );
 
   const handleCopySnippet = useCallback(
@@ -767,7 +761,7 @@ function CreateBlockPageContent() {
       await ensureProxyAuthScript();
       const configuration = {
         referenceId: currentReferenceId,
-        type: formatMethodType(selectedMethod ?? featureMethod),
+        type: formatMethodType(selectedMethod ?? featureMethod, selectedFeatureId ?? featureDetails?.feature_id),
         isPreview: true,
         target: "_blank",
         success: () => {
@@ -817,6 +811,9 @@ function CreateBlockPageContent() {
     if (step === 3) {
       return Boolean(authorizationKey.trim()) && Number(sessionTime) >= 60;
     }
+    if (step === 4) {
+      return true; // Design & Code step - always can proceed (block already created)
+    }
     return true;
   }, [
     authorizationKey,
@@ -837,7 +834,7 @@ function CreateBlockPageContent() {
     if (step !== 2 && !canProceedFromStep()) {
       return;
     }
-    setStep((prev) => Math.min(prev + 1, stepLabels.length - 1));
+    setStep((prev) => Math.min(prev + 1, STEP_LABELS.length - 1));
   };
 
   const goToPreviousStep = () => {
@@ -902,8 +899,49 @@ function CreateBlockPageContent() {
     }
     setSubmitting(true);
     try {
+      // Helper to check if a service has a redirect URI filled
+      const serviceHasRedirectUri = (service: MethodService) => {
+        const formState = serviceState[service.service_id];
+        
+        // Check requirements
+        const requirements = service.requirements as Record<string, FieldConfig> | undefined;
+        if (requirements) {
+          for (const [key] of Object.entries(requirements)) {
+            const normalizedKey = key.toLowerCase().replace(/[_-]/g, "");
+            if (REDIRECT_FIELD_PATTERNS.some((pattern) => normalizedKey.includes(pattern))) {
+              const fieldState = formState?.requirements?.[key];
+              if (fieldState?.value?.trim()) {
+                return true;
+              }
+            }
+          }
+        }
+
+        // Check configurations
+        const configurationFields = (service.configurations as MethodServiceConfiguration | undefined)?.fields as
+          | Record<string, FieldConfig>
+          | undefined;
+        if (configurationFields) {
+          for (const [key] of Object.entries(configurationFields)) {
+            const normalizedKey = key.toLowerCase().replace(/[_-]/g, "");
+            if (REDIRECT_FIELD_PATTERNS.some((pattern) => normalizedKey.includes(pattern))) {
+              const fieldState = formState?.configurations?.[key];
+              if (fieldState?.value?.trim()) {
+                return true;
+              }
+            }
+          }
+        }
+        return false;
+      };
+
+      // For both creation and edit mode, only include services that have a redirect URI filled
+      const servicesToInclude = (selectedMethod.method_services ?? []).filter((service) => {
+        return serviceHasRedirectUri(service);
+      });
+
       const servicesPayload = await Promise.all(
-        (selectedMethod.method_services ?? []).map(async (service) => {
+        servicesToInclude.map(async (service) => {
           const formState = serviceState[service.service_id];
           const requirements = await mapFieldGroupPayload(
             service.requirements as Record<string, FieldConfig>,
@@ -915,7 +953,7 @@ function CreateBlockPageContent() {
           );
           return {
             ...service,
-            is_enable: formState?.isEnabled ?? true,
+            is_enable: formState?.isEnabled ?? false,
             requirements,
             configurations: {
               ...(service.configurations as MethodServiceConfiguration),
@@ -937,7 +975,7 @@ function CreateBlockPageContent() {
         session_time: sessionTimeValue || 3600,
         extra_configurations: {
           theme,
-          allowNewUserRegistration: allowRegistrations,
+          create_account_link: allowRegistrations,
         },
         services: servicesPayload,
       };
@@ -945,8 +983,18 @@ function CreateBlockPageContent() {
         await FeaturesApi.update(editingFeatureId, payload);
         setSubmitSuccess("Block updated successfully.");
       } else {
-        await FeaturesApi.create(payload);
+        const response = await FeaturesApi.create(payload);
+        const createdData = response?.data;
         setSubmitSuccess("Block created successfully.");
+        // Store created feature data and move to Design & Code step
+        if (createdData?.id) {
+          setCreatedFeatureData({
+            id: createdData.id,
+            reference_id: createdData.reference_id ?? "",
+          });
+          setStep(4); // Move to Design & Code step
+          return;
+        }
       }
       setSubmitError(null);
     } catch (error) {
@@ -963,27 +1011,66 @@ function CreateBlockPageContent() {
     config: FieldConfig,
     fieldState: FieldState
   ) => {
-    if (!config || config.is_hidden) {
+    if (!config) {
       return null;
+    }
+
+    // Also check is_hidden property first
+    if (config.is_hidden) {
+      return null;
+    }
+
+    // Check filter_conditions to determine if field should be shown/hidden
+    if (config.filter_conditions && Array.isArray(config.filter_conditions)) {
+      for (const condition of config.filter_conditions) {
+        if (condition.when?.field) {
+          const dependentFieldKey = condition.when.field;
+          const expectedValue = condition.when.equals;
+          // Check in both requirements and configurations
+          const formState = serviceState[serviceId];
+          const reqValue = formState?.requirements?.[dependentFieldKey]?.value;
+          const configValue = formState?.configurations?.[dependentFieldKey]?.value;
+          const currentValue = reqValue ?? configValue ?? "";
+          
+          const conditionMet = currentValue === expectedValue;
+          
+          // If hide is true, hide when condition is met
+          // If hide is false/undefined, this might mean show ONLY when condition is met
+          if (condition.hide === true && conditionMet) {
+            return null; // Hide the field when condition is met
+          }
+          if (condition.hide === false && !conditionMet) {
+            return null; // Show only when condition is met (hide when not met)
+          }
+        }
+      }
     }
     const label = config.label ?? fieldKey;
     const id = `${serviceId}-${group}-${fieldKey}`;
     const options = config.type === "select" ? getSelectOptions(config) : [];
+    const isDisabled = Boolean(config.is_disable);
+    
+    // Check if service is enabled - only validate when enabled in edit mode
+    const serviceEnabled = serviceState[serviceId]?.isEnabled ?? false;
+    const shouldValidate = !isEditMode || serviceEnabled;
+
+    const disabledClass = isDisabled ? "bg-[#f4f5f7] text-[#8f9396] cursor-not-allowed" : "";
 
     const commonInput =
       config.type === "textarea" ? (
         <textarea
           id={id}
-          className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
+          className={`w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none ${disabledClass}`}
           placeholder={config.placeholder ? String(config.placeholder) : `Enter ${label}`}
           value={fieldState.value}
+          disabled={isDisabled}
           onChange={(event) =>
             updateFieldState(serviceId, group, fieldKey, { value: event.target.value, touched: true, error: null })
           }
           onBlur={() =>
             updateFieldState(serviceId, group, fieldKey, {
               touched: true,
-              error: validateField(config, serviceState[serviceId]?.[group]?.[fieldKey]),
+              error: shouldValidate ? validateField(config, serviceState[serviceId]?.[group]?.[fieldKey]) : null,
             })
           }
           rows={3}
@@ -992,16 +1079,17 @@ function CreateBlockPageContent() {
         <input
           id={id}
           type="text"
-          className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
+          className={`w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none ${disabledClass}`}
           placeholder={config.placeholder ? String(config.placeholder) : `Enter ${label}`}
           value={fieldState.value}
+          disabled={isDisabled}
           onChange={(event) =>
             updateFieldState(serviceId, group, fieldKey, { value: event.target.value, touched: true, error: null })
           }
           onBlur={() =>
             updateFieldState(serviceId, group, fieldKey, {
               touched: true,
-              error: validateField(config, serviceState[serviceId]?.[group]?.[fieldKey]),
+              error: shouldValidate ? validateField(config, serviceState[serviceId]?.[group]?.[fieldKey]) : null,
             })
           }
         />
@@ -1016,15 +1104,16 @@ function CreateBlockPageContent() {
         {config.type === "select" ? (
           <select
             id={id}
-            className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
+            className={`w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none ${disabledClass}`}
             value={fieldState.value}
+            disabled={isDisabled}
             onChange={(event) =>
               updateFieldState(serviceId, group, fieldKey, { value: event.target.value, touched: true, error: null })
             }
             onBlur={() =>
               updateFieldState(serviceId, group, fieldKey, {
                 touched: true,
-                error: validateField(config, serviceState[serviceId]?.[group]?.[fieldKey]),
+                error: shouldValidate ? validateField(config, serviceState[serviceId]?.[group]?.[fieldKey]) : null,
               })
             }
           >
@@ -1036,38 +1125,46 @@ function CreateBlockPageContent() {
             ))}
           </select>
         ) : config.type === "chipList" ? (
-          <div className="space-y-2">
-            <div className="flex flex-wrap gap-2">
-              {fieldState.chips.map((chip) => (
-                <span
-                  key={chip}
-                  className="inline-flex items-center gap-1 rounded-full bg-[#3f51b5]/10 px-3 py-1 text-xs text-[#3f51b5]"
-                >
-                  {chip}
+          <div
+            className={`flex flex-wrap items-center gap-2 rounded-2xl border border-[#d5d9dc] px-3 py-2 min-h-[42px] ${
+              isDisabled ? "bg-[#f4f5f7] cursor-not-allowed" : "focus-within:border-[#3f51b5]"
+            }`}
+          >
+            {fieldState.chips.map((chip) => (
+              <span
+                key={chip}
+                className="inline-flex items-center gap-1 rounded-full bg-[#3f51b5]/10 px-2.5 py-0.5 text-xs text-[#3f51b5]"
+              >
+                {chip}
+                {!isDisabled && (
                   <button
                     type="button"
-                    className="text-[#3f51b5]"
+                    className="text-[#3f51b5] hover:text-[#303f9f] ml-0.5"
                     onClick={() => {
                       const next = fieldState.chips.filter((entry) => entry !== chip);
                       updateFieldState(serviceId, group, fieldKey, {
                         chips: next,
                         touched: true,
-                        error: validateField(config, { ...fieldState, chips: next }),
+                        error: shouldValidate ? validateField(config, { ...fieldState, chips: next }) : null,
                       });
                     }}
                   >
                     ×
                   </button>
-                </span>
-              ))}
-            </div>
+                )}
+              </span>
+            ))}
             <input
               type="text"
-              className="w-full rounded-2xl border border-dashed border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
-              placeholder={config.placeholder ? String(config.placeholder) : `Add ${label}`}
+              className={`flex-1 min-w-[120px] border-none bg-transparent text-sm focus:outline-none ${
+                isDisabled ? "cursor-not-allowed text-[#8f9396]" : ""
+              }`}
+              placeholder={fieldState.chips.length === 0 ? (config.placeholder ? String(config.placeholder) : `Add ${label}`) : ""}
               value={fieldState.value}
+              disabled={isDisabled}
               onChange={(event) => updateFieldState(serviceId, group, fieldKey, { value: event.target.value })}
               onKeyDown={(event) => {
+                if (isDisabled) return;
                 if (event.key === "Enter" || event.key === "," || event.key === "Tab") {
                   event.preventDefault();
                   const value = fieldState.value.trim();
@@ -1077,11 +1174,19 @@ function CreateBlockPageContent() {
                       chips: updated,
                       value: "",
                       touched: true,
-                      error: validateField(config, { ...fieldState, chips: updated, value: "" }),
+                      error: shouldValidate ? validateField(config, { ...fieldState, chips: updated, value: "" }) : null,
                     });
                   } else {
                     updateFieldState(serviceId, group, fieldKey, { value: "" });
                   }
+                }
+                if (event.key === "Backspace" && !fieldState.value && fieldState.chips.length > 0) {
+                  const next = fieldState.chips.slice(0, -1);
+                  updateFieldState(serviceId, group, fieldKey, {
+                    chips: next,
+                    touched: true,
+                    error: shouldValidate ? validateField(config, { ...fieldState, chips: next }) : null,
+                  });
                 }
               }}
             />
@@ -1091,6 +1196,8 @@ function CreateBlockPageContent() {
             <input
               type="file"
               accept={config.allowed_types ? String(config.allowed_types) : undefined}
+              disabled={isDisabled}
+              className={isDisabled ? "cursor-not-allowed opacity-50" : ""}
               onChange={async (event) => {
                 const file = event.target.files?.[0];
                 if (!file) {
@@ -1098,7 +1205,7 @@ function CreateBlockPageContent() {
                     file: null,
                     value: "",
                     touched: true,
-                    error: validateField(config, { ...fieldState, file: null, value: "" }),
+                    error: shouldValidate ? validateField(config, { ...fieldState, file: null, value: "" }) : null,
                   });
                   return;
                 }
@@ -1117,7 +1224,7 @@ function CreateBlockPageContent() {
         )}
         {config.hint && <p className="text-xs text-[#8f9396]">{String(config.hint)}</p>}
         {config.info && <p className="text-xs text-[#8f9396]">{String(config.info)}</p>}
-        {fieldState.error && fieldState.touched && (
+        {shouldValidate && fieldState.error && fieldState.touched && (
           <p className="text-xs text-[#b91c1c]">{fieldState.error}</p>
         )}
       </div>
@@ -1135,32 +1242,39 @@ function CreateBlockPageContent() {
       <div key={service.service_id} className="rounded-2xl border border-[#e1e4e8] p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-semibold text-[#212528]">{service.name}</p>
-            <p className="text-xs text-[#5d6164]">Service ID • {service.service_id}</p>
+            <p className="text-base font-bold text-[#212528]">{service.name}</p>
           </div>
-          <label className="inline-flex items-center gap-2 text-xs text-[#5d6164]">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-[#d5d9dc]"
-              checked={formState?.isEnabled ?? true}
-              onChange={(event) =>
+          {isEditMode && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={formState?.isEnabled ?? false}
+              onClick={() =>
                 setServiceState((prev) => ({
                   ...prev,
                   [service.service_id]: {
                     ...prev[service.service_id],
-                    isEnabled: event.target.checked,
+                    isEnabled: !(prev[service.service_id]?.isEnabled ?? false),
                     requirements: prev[service.service_id]?.requirements ?? {},
                     configurations: prev[service.service_id]?.configurations ?? {},
                   },
                 }))
               }
-            />
-            Enable
-          </label>
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3f51b5] focus-visible:ring-offset-2 ${
+                formState?.isEnabled ?? false ? "bg-[#3f51b5]" : "bg-[#d5d9dc]"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                  formState?.isEnabled ?? false ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          )}
         </div>
         {requirements && Object.keys(requirements).length > 0 && (
           <div className="space-y-3">
-            <p className="text-xs font-semibold text-[#5d6164] uppercase">Requirements</p>
+            <p className="text-sm font-bold text-[#212528]">Requirements</p>
             <div className="grid gap-4 md:grid-cols-2">
               {Object.entries(requirements).map(([key, config]) =>
                 renderField(service.service_id, "requirements", key, config, formState?.requirements?.[key] ?? {
@@ -1175,7 +1289,7 @@ function CreateBlockPageContent() {
         )}
         {configurationFields && Object.keys(configurationFields).length > 0 && (
           <div className="space-y-3">
-            <p className="text-xs font-semibold text-[#5d6164] uppercase">Configurations</p>
+            <p className="text-sm font-bold text-[#212528]">Configurations</p>
             <div className="grid gap-4 md:grid-cols-2">
               {Object.entries(configurationFields).map(([key, config]) =>
                 renderField(service.service_id, "configurations", key, config, formState?.configurations?.[key] ?? {
@@ -1185,6 +1299,46 @@ function CreateBlockPageContent() {
                   error: null,
                 })
               )}
+            </div>
+          </div>
+        )}
+        {isEditMode && featureDetails?.callback_url && (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-[#5d6164]">
+                Callback URL
+              </label>
+              <div className="relative flex items-center">
+                <input
+                  type="text"
+                  className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 pr-12 text-sm bg-[#f4f5f7] text-[#5d6164] cursor-not-allowed focus:outline-none"
+                  value={featureDetails.callback_url}
+                  disabled
+                  readOnly
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 p-1.5 rounded-lg hover:bg-[#e1e4e8] transition-colors"
+                  onClick={() => {
+                    if (featureDetails.callback_url) {
+                      navigator.clipboard.writeText(featureDetails.callback_url);
+                      handleCopySnippet(`callback-${service.service_id}`, featureDetails.callback_url);
+                    }
+                  }}
+                  title="Copy callback URL"
+                >
+                  {copiedSnippet === `callback-${service.service_id}` ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f9d58" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5d6164" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1207,22 +1361,7 @@ function CreateBlockPageContent() {
       </div>
       {methodsError && <p className="text-sm text-[#b91c1c]">{methodsError}</p>}
       {methodsLoading && <p className="text-sm text-[#5d6164]">Loading available services…</p>}
-      {!methodsLoading && methods.length > 0 && (
-        <div className="space-y-2">
-          <label className="text-xs font-semibold text-[#5d6164]">Integration Method</label>
-          <select
-            value={selectedMethod?.id ?? ""}
-            onChange={(event) => setSelectedMethodId(Number(event.target.value))}
-            className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
-          >
-            {methods.map((method) => (
-              <option key={method.id} value={method.id}>
-                {method.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+   
     </div>
   );
 
@@ -1331,84 +1470,113 @@ function CreateBlockPageContent() {
     const includePreview = options?.includePreview ?? isEditMode;
     const authorizationFormat = featureDetails?.authorization_format?.format ?? selectedMethod?.authorization_format?.format;
     return (
-      <div className={`grid gap-6 ${includePreview ? "lg:grid-cols-[1.15fr_0.85fr]" : ""}`}>
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-[#5d6164]">Authorization Key</label>
-              <input
-                type="text"
-                value={authorizationKey}
-                onChange={(event) => setAuthorizationKey(event.target.value)}
-                placeholder="Enter authorization key"
-                className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
-              />
-              {!authorizationKey.trim() && <p className="text-xs text-[#b91c1c]">Key is required.</p>}
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-[#5d6164]">Session Time (seconds)</label>
-              <input
-                type="number"
-                min={60}
-                value={sessionTime}
-                onChange={(event) => setSessionTime(event.target.value)}
-                className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
-              />
-              {Number(sessionTime) < 60 && (
-                <p className="text-xs text-[#b91c1c]">Minimum session time is 60 seconds.</p>
-              )}
+      <div className={`grid gap-8 ${includePreview ? "lg:grid-cols-[1.15fr_0.85fr]" : ""}`}>
+        <div className="space-y-6">
+          {/* Authorization Settings */}
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-[#212528]">Authorization Settings</p>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-[#5d6164]">Authorization Key</label>
+                <input
+                  type="text"
+                  value={authorizationKey}
+                  onChange={(event) => setAuthorizationKey(event.target.value)}
+                  placeholder="Enter authorization key"
+                  className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2.5 text-sm focus:border-[#3f51b5] focus:outline-none"
+                />
+                {!authorizationKey.trim() && <p className="text-xs text-[#b91c1c]">Key is required.</p>}
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-[#5d6164]">Session Time (seconds)</label>
+                <input
+                  type="number"
+                  min={60}
+                  value={sessionTime}
+                  onChange={(event) => setSessionTime(event.target.value)}
+                  className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2.5 text-sm focus:border-[#3f51b5] focus:outline-none"
+                />
+                {Number(sessionTime) < 60 && (
+                  <p className="text-xs text-[#b91c1c]">Minimum session time is 60 seconds.</p>
+                )}
+              </div>
             </div>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-[#5d6164]">Theme</label>
-              <select
-                value={theme}
-                onChange={(event) => setTheme(event.target.value)}
-                className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
-              >
-                {themeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+
+          {/* Appearance Settings */}
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-[#212528]">Appearance</p>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-[#5d6164]">Theme</label>
+                <select
+                  value={theme}
+                  onChange={(event) => setTheme(event.target.value)}
+                  className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2.5 text-sm focus:border-[#3f51b5] focus:outline-none"
+                >
+                  {THEME_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center justify-between rounded-2xl border border-[#d5d9dc] px-4 py-3">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-[#212528]">Allow end-users to self-register</p>
+                  <p className="text-xs text-[#5d6164]">Enable user self-registration on the login form</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={allowRegistrations}
+                  onClick={() => setAllowRegistrations(!allowRegistrations)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3f51b5] focus-visible:ring-offset-2 ${
+                    allowRegistrations ? "bg-[#3f51b5]" : "bg-[#d5d9dc]"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      allowRegistrations ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
-            <label className="flex items-center gap-2 text-xs text-[#5d6164]">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-[#d5d9dc]"
-                checked={allowRegistrations}
-                onChange={(event) => setAllowRegistrations(event.target.checked)}
-              />
-              Allow end-users to self-register
-            </label>
           </div>
-          <p className="text-xs text-[#5d6164]">
-            The JSON below represents the payload you will receive after a successful login. Use this to wire
-            verification inside your platform.
-          </p>
+
+          {/* Response Format */}
           {authorizationFormat && (
-            <div className="relative rounded-2xl border border-[#e1e4e8] bg-[#0b1120] p-4 text-xs text-white">
-              <pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(authorizationFormat, null, 2)}</pre>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-[#212528]">Response Format</p>
+                <p className="text-xs text-[#5d6164]">
+                  The JSON below represents the payload you will receive after a successful login.
+                </p>
+              </div>
+              <div className="relative rounded-2xl border border-[#e1e4e8] bg-[#0b1120] p-4 text-xs text-white">
+                <pre className="overflow-auto whitespace-pre-wrap max-h-48">{JSON.stringify(authorizationFormat, null, 2)}</pre>
+              </div>
             </div>
           )}
         </div>
-        {includePreview && (
-          <div className="space-y-3">
+
+        {/* {includePreview && (
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-[#212528]">Preview</p>
             {isEditMode && (
-              <div className="flex items-center justify-center gap-2 rounded-full bg-[#f4f5f7] p-1 text-xs font-semibold">
+              <div className="flex items-center justify-center gap-1 rounded-full bg-[#f4f5f7] p-1 text-xs font-semibold">
                 <button
                   type="button"
-                  className={`flex-1 rounded-full px-3 py-1 ${previewLayout === "top" ? "bg-white shadow" : "text-[#5d6164]"}`}
+                  className={`flex-1 rounded-full px-4 py-2 transition-all ${previewLayout === "top" ? "bg-white shadow-sm" : "text-[#5d6164] hover:text-[#212528]"}`}
                   onClick={() => setPreviewLayout("top")}
                 >
                   Input on Top
                 </button>
                 <button
                   type="button"
-                  className={`flex-1 rounded-full px-3 py-1 ${
-                    previewLayout === "bottom" ? "bg-white shadow" : "text-[#5d6164]"
+                  className={`flex-1 rounded-full px-4 py-2 transition-all ${
+                    previewLayout === "bottom" ? "bg-white shadow-sm" : "text-[#5d6164] hover:text-[#212528]"
                   }`}
                   onClick={() => setPreviewLayout("bottom")}
                 >
@@ -1418,7 +1586,7 @@ function CreateBlockPageContent() {
             )}
             {renderAuthorizationPreview()}
           </div>
-        )}
+        )} */}
       </div>
     );
   };
@@ -1523,7 +1691,7 @@ function CreateBlockPageContent() {
         {isEditMode ? (
           <>
             <div className="flex flex-wrap gap-3">
-              {editTabs.map((tab) => (
+              {EDIT_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   className={`rounded-full px-4 py-2 text-xs font-semibold transition-colors ${
@@ -1547,14 +1715,23 @@ function CreateBlockPageContent() {
                   <div className="space-y-4 rounded-2xl border border-[#e1e4e8] p-4">
                     {renderServiceConfigurationSection()}
                   </div>
-                  <div className="flex justify-end">
-                    <button
-                      className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                      onClick={handleSubmit}
-                      disabled={submitting}
-                    >
-                      {submitting ? "Saving…" : "Update Services"}
-                    </button>
+                  <div className="flex justify-between">
+                    <div />
+                    <div className="flex gap-3">
+                      <button
+                        className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        onClick={handleSubmit}
+                        disabled={submitting}
+                      >
+                        {submitting ? "Saving…" : "Update Services"}
+                      </button>
+                      <button
+                        className="rounded-full border border-[#3f51b5] px-6 py-2 text-sm font-semibold text-[#3f51b5] hover:bg-[#3f51b5]/5"
+                        onClick={() => setActiveEditTab("settings")}
+                      >
+                        Next
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
@@ -1563,28 +1740,53 @@ function CreateBlockPageContent() {
                   <div className="space-y-4 rounded-2xl border border-[#e1e4e8] p-4">
                     {renderAuthorizationSettingsSection({ includePreview: true })}
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex justify-between">
                     <button
-                      className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                      onClick={handleSubmit}
-                      disabled={submitting}
+                      className="rounded-full border border-[#d5d9dc] px-4 py-2 text-sm text-[#5d6164] hover:bg-[#f4f5f7]"
+                      onClick={() => setActiveEditTab("service")}
                     >
-                      {submitting ? "Saving…" : "Save Settings"}
+                      Back
                     </button>
+                    <div className="flex gap-3">
+                      <button
+                        className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        onClick={handleSubmit}
+                        disabled={submitting}
+                      >
+                        {submitting ? "Saving…" : "Save Settings"}
+                      </button>
+                      <button
+                        className="rounded-full border border-[#3f51b5] px-6 py-2 text-sm font-semibold text-[#3f51b5] hover:bg-[#3f51b5]/5"
+                        onClick={() => setActiveEditTab("design")}
+                      >
+                        Next
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
               {activeEditTab === "design" && (
-                <div className="space-y-4 rounded-2xl border border-[#e1e4e8] p-4">
-                  {renderDesignAndCodeSection()}
-                </div>
+                <>
+                  <div className="space-y-4 rounded-2xl border border-[#e1e4e8] p-4">
+                    {renderDesignAndCodeSection()}
+                  </div>
+                  <div className="flex justify-between">
+                    <button
+                      className="rounded-full border border-[#d5d9dc] px-4 py-2 text-sm text-[#5d6164] hover:bg-[#f4f5f7]"
+                      onClick={() => setActiveEditTab("settings")}
+                    >
+                      Back
+                    </button>
+                    <div />
+                  </div>
+                </>
               )}
             </div>
           </>
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-3">
-              {stepLabels.map((label, index) => (
+              {STEP_LABELS.map((label, index) => (
                 <Fragment key={label}>
                   <button
                     className={`inline-flex items-center rounded-full px-4 py-2 text-xs font-semibold ${
@@ -1602,7 +1804,7 @@ function CreateBlockPageContent() {
                   >
                     {label}
                   </button>
-                  {index < stepLabels.length - 1 && <span className="text-[#d5d9dc]">—</span>}
+                  {index < STEP_LABELS.length - 1 && <span className="text-[#d5d9dc]">—</span>}
                 </Fragment>
               ))}
             </div>
@@ -1644,10 +1846,19 @@ function CreateBlockPageContent() {
             {step === 1 && renderBlockBasicsSection()}
             {step === 2 && renderServiceConfigurationSection()}
             {step === 3 && renderAuthorizationSettingsSection({ includePreview: false })}
+            {step === 4 && (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+                  <p className="font-medium">Block created successfully!</p>
+                  <p>Your block is ready. Use the code snippets below to integrate it into your application.</p>
+                </div>
+                {renderDesignAndCodeSection()}
+              </div>
+            )}
 
             <div className="flex flex-wrap justify-between gap-3">
               <div className="flex gap-2">
-                {step > 0 && (
+                {step > 0 && step < 4 && (
                   <button
                     className="rounded-full border border-[#d5d9dc] px-4 py-2 text-sm text-[#5d6164]"
                     onClick={goToPreviousStep}
@@ -1655,7 +1866,7 @@ function CreateBlockPageContent() {
                     Back
                   </button>
                 )}
-                {step < stepLabels.length - 1 && (
+                {step < 3 && (
                   <button
                     className="rounded-full bg-[#3f51b5] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
                     onClick={goToNextStep}
@@ -1665,14 +1876,30 @@ function CreateBlockPageContent() {
                   </button>
                 )}
               </div>
-              {step === stepLabels.length - 1 && (
+              {step === 3 && (
                 <button
                   className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold text-white disabled:opacity-50"
                   onClick={handleSubmit}
                   disabled={submitting || !canProceedFromStep()}
                 >
-                  {submitting ? "Saving…" : submitLabel}
+                  {submitting ? "Creating…" : "Create Block"}
                 </button>
+              )}
+              {step === 4 && createdFeatureData && (
+                <div className="flex gap-3">
+                  <Link
+                    href="/app/features"
+                    className="rounded-full border border-[#d5d9dc] px-5 py-2 text-sm text-[#5d6164] hover:bg-[#f4f5f7]"
+                  >
+                    Back to Blocks
+                  </Link>
+                  <Link
+                    href={`/app/features/create?featureId=${createdFeatureData.id}`}
+                    className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold text-white hover:bg-[#303f9f]"
+                  >
+                    Manage Block
+                  </Link>
+                </div>
               )}
             </div>
           </>

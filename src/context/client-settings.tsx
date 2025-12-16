@@ -5,6 +5,7 @@ import type { ClientSettings } from "@/lib/api";
 
 export type ClientSettingsContextValue = {
   clientSettings: ClientSettings | null;
+  clientId: number | null;
   refreshClientSettings: () => Promise<void>;
 };
 

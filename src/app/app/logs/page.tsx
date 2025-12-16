@@ -3,6 +3,7 @@
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import type { EnvironmentEntity, LogDetail, LogListEntry, ProjectEntity } from "@/lib/api";
 import { LogsApi } from "@/lib/api";
+import { useClientSettings } from "@/context/client-settings";
 
 const requestTypes = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const pageSizeOptions = [25, 50, 100];
@@ -78,6 +79,7 @@ const formatJson = (value: unknown) => {
 };
 
 export default function LogsPage() {
+  const { clientId } = useClientSettings();
   const [search, setSearch] = useState("");
   const [projectId, setProjectId] = useState<string>("all");
   const [environmentId, setEnvironmentId] = useState<string>("all");
@@ -125,7 +127,7 @@ export default function LogsPage() {
     } finally {
       setProjectsLoading(false);
     }
-  }, []);
+  }, [clientId]);
 
   const fetchEnvironments = useCallback(async () => {
     setEnvironmentsLoading(true);
@@ -137,7 +139,7 @@ export default function LogsPage() {
     } finally {
       setEnvironmentsLoading(false);
     }
-  }, []);
+  }, [clientId]);
 
 const fetchLogs = useCallback(async () => {
     setLogsLoading(true);
@@ -176,7 +178,7 @@ const fetchLogs = useCallback(async () => {
     } finally {
       setLogsLoading(false);
     }
-  }, [dateRange, environmentId, pageIndex, pageSize, projectId, range, rangeField, search, selectedTypes]);
+  }, [dateRange, environmentId, pageIndex, pageSize, projectId, range, rangeField, search, selectedTypes, clientId]);
 
   const fetchLogDetail = useCallback(async (logId: string) => {
     setLogDetailLoading(true);

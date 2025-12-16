@@ -3,6 +3,7 @@
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import type { ClientPermission, ClientRole, FeatureDetails, FeatureEntity, UserEntity } from "@/lib/api";
 import { FeaturesApi, UsersApi } from "@/lib/api";
+import { useClientSettings } from "@/context/client-settings";
 
 const dateRanges = [
   { id: "currentMonth", label: "Current Month" },
@@ -76,6 +77,7 @@ type PermissionFormState = {
 type ManagementTab = "roles" | "permissions" | "settings";
 
 export default function UsersPage() {
+  const { clientId } = useClientSettings();
   const [activeTab, setActiveTab] = useState<"users" | "management">("users");
   const [search, setSearch] = useState("");
   const [company, setCompany] = useState("");
@@ -177,7 +179,7 @@ export default function UsersPage() {
     } finally {
       setUsersLoading(false);
     }
-  }, [company, dateRange, featureFilter, pageIndex, pageSize, search]);
+  }, [company, dateRange, featureFilter, pageIndex, pageSize, search, clientId]);
 
   const fetchFeatures = useCallback(async () => {
     setFeaturesLoading(true);
@@ -191,7 +193,7 @@ export default function UsersPage() {
     } finally {
       setFeaturesLoading(false);
     }
-  }, []);
+  }, [clientId]);
 
   const loadRoles = useCallback(async () => {
     if (!managementFeatureRef) {

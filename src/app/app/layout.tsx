@@ -367,6 +367,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       await RootApi.switchClient(client.id);
       setClientId(client.id);
       await refreshClientSettings();
+      // Redirect to features page after switching client
+      router.push("/app/features");
     } catch (error) {
       if (error instanceof ProxyApiError && error.status === 401) {
         redirectToLogin();
@@ -396,15 +398,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [redirectToLogin]);
 
   return (
-    <ClientSettingsContext.Provider value={{ clientSettings, refreshClientSettings }}>
+    <ClientSettingsContext.Provider value={{ clientSettings, clientId, refreshClientSettings }}>
       <ChatbotContext.Provider value={{ status: chatbotStatus, error: chatbotError, visible: showChatbot, retry: retryChatbot }}>
         <div className="flex min-h-screen bg-app-surface text-[#3f4346]">
         <aside
-          className={`hidden md:flex flex-col bg-white border-r border-[#e1e4e8] shadow-sm transition-all duration-200 ${
+          className={`hidden md:flex flex-col h-screen sticky top-0 bg-white border-r border-[#e1e4e8] shadow-sm transition-all duration-200 ${
             isCollapsed ? "w-[76px]" : "w-[264px]"
           }`}
         >
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-[#e1e4e8]">
+          {/* <div className="flex items-center gap-2 px-5 py-4 border-b border-[#e1e4e8]">
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(63,81,181,0.12)] text-[#3f51b5] font-semibold">
               SA
             </span>
@@ -414,8 +416,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <p className="text-xs text-[#5d6164]">Proxy Management</p>
               </div>
             )}
-          </div>
-          <nav className="flex-1 px-2 py-4 space-y-1">
+          </div> */}
+          <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-1">
             {navItems.map((item) => {
               const isActive = pathname.startsWith(item.href);
               return (
@@ -435,12 +437,53 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <div className="px-4 py-4 border-t border-[#e1e4e8] text-xs text-[#5d6164]">
-            {!isCollapsed && (
-              <Fragment>
-                <p className="font-semibold text-[#212528]">{currentUserName}</p>
-                <p>{currentUserEmail}</p>
-              </Fragment>
+          <div className="relative shrink-0 px-2 py-4 border-t border-[#e1e4e8]" ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen((prev) => !prev)}
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 hover:bg-[rgba(63,81,181,0.08)] ${
+                isCollapsed ? "justify-center" : ""
+              }`}
+              disabled={refreshingSettings && !clientSettings}
+            >
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#3f51b5] text-white font-semibold text-sm">
+                {currentUserName
+                  .split(" ")
+                  .map((n) => n[0])
+                  .join("")
+                  .slice(0, 2)}
+              </span>
+              {!isCollapsed && (
+                <div className="flex flex-1 flex-col text-left overflow-hidden">
+                  <span className="text-sm font-semibold text-[#212528] truncate">{currentUserName}</span>
+                  <span className="text-xs text-[#5d6164] truncate">{refreshingSettings ? "Syncing…" : currentUserEmail}</span>
+                </div>
+              )}
+              {!isCollapsed && (
+                <svg width="14" height="14" viewBox="0 0 24 24" className="shrink-0 text-[#5d6164]">
+                  <path
+                    d="m6 9 6 6 6-6"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                </svg>
+              )}
+            </button>
+            {userMenuOpen && (
+              <div className={`absolute ${isCollapsed ? "left-full ml-2" : "left-2 right-2"} bottom-full mb-2 z-20 rounded-2xl border border-[#e1e4e8] bg-white p-2 shadow-lg`}>
+                <p className="px-3 py-2 text-xs text-[#5d6164]">Signed in as {currentUserEmail}</p>
+                <button className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-[rgba(63,81,181,0.08)]">
+                  View profile
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="w-full rounded-xl px-3 py-2 text-left text-sm text-[#b91c1c] hover:bg-[rgba(239,68,68,0.12)]"
+                >
+                  Logout
+                </button>
+              </div>
             )}
           </div>
         </aside>
@@ -544,7 +587,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               )}
             </div>
-            <div className="ml-auto flex items-center gap-3" ref={userMenuRef}>
+            <div className="ml-auto flex items-center gap-3">
               <span className="hidden md:block text-xs text-[#5d6164]">
                 {new Date().toLocaleString("en-IN", {
                   weekday: "short",
@@ -552,41 +595,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   minute: "2-digit",
                 })}
               </span>
-              <button
-                onClick={() => setUserMenuOpen((prev) => !prev)}
-                className="inline-flex items-center gap-3 rounded-full border border-[#d5d9dc] px-3 py-2 hover:border-[#3f51b5]"
-                disabled={refreshingSettings && !clientSettings}
-              >
-                <div className="flex flex-col text-left">
-                  <span className="text-sm font-semibold text-[#212528]">{currentUserName}</span>
-                  <span className="text-xs text-[#5d6164]">{refreshingSettings ? "Syncing…" : "Administrator"}</span>
-                </div>
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#3f51b5] text-white font-semibold">
-                  {currentUserName
-                    .split(" ")
-                    .map((n) => n[0])
-                    .join("")
-                    .slice(0, 2)}
-                </span>
-              </button>
-              {userMenuOpen && (
-                <div className="absolute right-0 top-14 z-20 w-48 rounded-2xl border border-[#e1e4e8] bg-white p-2 shadow-lg">
-                  <p className="px-3 py-2 text-xs text-[#5d6164]">Signed in as {currentUserEmail}</p>
-                  <button className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-[rgba(63,81,181,0.08)]">
-                    View profile
-                  </button>
-                <button
-                  onClick={handleLogout}
-                  className="w-full rounded-xl px-3 py-2 text-left text-sm text-[#b91c1c] hover:bg-[rgba(239,68,68,0.12)]"
-                >
-                  Logout
-                </button>
-                </div>
-              )}
             </div>
           </header>
           <main className="flex-1 overflow-y-auto bg-app-surface p-4 md:p-6">
-            <div className={showChatbot ? "hidden" : "min-h-full"}>{children}</div>
+            <div key={clientId ?? "no-client"} className={showChatbot ? "hidden" : "min-h-full"}>{children}</div>
             <div id="ChatbotContainer" className={showChatbot ? "min-h-[60vh]" : "hidden"} />
           </main>
         </div>
