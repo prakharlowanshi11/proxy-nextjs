@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <div id="proxyContainer"></div>
+
+<script>
+(function () {
+    // Avoid duplicate load
+    if (document.querySelector('script[src="http://localhost:3000/assets/proxy-auth/proxy-auth.js"]')) {
+        return;
+    }
+
+    // Read cookie value
+    function getCookie(name) {
+        const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+        return match ? decodeURIComponent(match[2]) : '';
+    }
+
+    // MSG91 Proxy Auth configuration
+    window.proxyAuthConfig = {
+        authToken: getCookie('proxy_token') || '',
+        type: 'user-management',
+        success: function (data) {
+            // success callback
+            // console.log(data);
+        },
+        failure: function (error) {
+            console.error('Proxy auth failed:', error);
+        }
+    };
+
+    // Load MSG91 script
+    var script = document.createElement('script');
+    script.src = 'http://localhost:3000/assets/proxy-auth/proxy-auth.js';
+    script.async = true;
+
+    script.onload = function () {
+        if (window.initVerification) {
+            window.initVerification(window.proxyAuthConfig);
+        }
+    };
+
+    script.onerror = function () {
+        console.error('Failed to load proxy auth script');
+    };
+
+    document.body.appendChild(script);
+})();
+</script>
+
+    
+</body>
+</html>
