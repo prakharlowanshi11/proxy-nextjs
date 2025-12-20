@@ -12,6 +12,7 @@ import type {
 } from "@/lib/api";
 import { FeaturesApi } from "@/lib/api";
 import type { FieldConfig, FieldState, FieldGroupState, ServiceFormState, FieldGroupKey, EditTab } from "@/types";
+import { useToast } from "@/context/toast";
 import {
   STEP_LABELS,
   NAME_REGEX,
@@ -277,7 +278,7 @@ function CreateBlockPageContent() {
   const [featureDetails, setFeatureDetails] = useState<FeatureDetails | null>(null);
   const [featureDetailsLoading, setFeatureDetailsLoading] = useState(false);
   const [featureDetailsError, setFeatureDetailsError] = useState<string | null>(null);
-  const [hasHydratedFromDetails, setHasHydratedFromDetails] = useState(false);
+  const hasHydratedFromDetailsRef = useRef(false);
 
   const [selectedFeatureId, setSelectedFeatureId] = useState<number | null>(null);
   const [methods, setMethods] = useState<MethodEntity[]>([]);
@@ -290,6 +291,7 @@ function CreateBlockPageContent() {
   );
 
   const [blockName, setBlockName] = useState("");
+  const [blockNameTouched, setBlockNameTouched] = useState(false);
   const [serviceState, setServiceState] = useState<Record<number, ServiceFormState>>({});
   const [authorizationKey, setAuthorizationKey] = useState("");
   const [sessionTime, setSessionTime] = useState("3600");
@@ -303,6 +305,7 @@ function CreateBlockPageContent() {
   const [previewFeedback, setPreviewFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const previewScriptLoadRef = useRef<Promise<void> | null>(null);
   const previewFeedbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const { success: showToastSuccess, error: showToastError } = useToast();
 
   const isServiceEnabled = useCallback(
     (service: MethodService) => {
@@ -331,8 +334,17 @@ function CreateBlockPageContent() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [createdFeatureData, setCreatedFeatureData] = useState<{ id: number; reference_id: string } | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<number | null>(null);
 
   const effectiveReferenceId = createdFeatureData?.reference_id ?? featureDetails?.reference_id ?? null;
+
+  // Set default selected service when services are loaded
+  useEffect(() => {
+    const services = selectedMethod?.method_services ?? [];
+    if (services.length > 0 && !selectedServiceId) {
+      setSelectedServiceId(services[0].service_id);
+    }
+  }, [selectedMethod?.method_services, selectedServiceId]);
   
   const scriptSnippet = useMemo(
     () => buildProxyAuthScript(effectiveReferenceId ?? (blockName.trim().toLowerCase().replace(/\s+/g, "_") || null), formatMethodType(selectedMethod, selectedFeatureId ?? featureDetails?.feature_id)),
@@ -342,10 +354,6 @@ function CreateBlockPageContent() {
   const demoDivSnippet = useMemo(() => buildDemoDivSnippet(effectiveReferenceId ?? (blockName.trim().toLowerCase().replace(/\s+/g, "_") || null)), [effectiveReferenceId, blockName]);
   const currentReferenceId = effectiveReferenceId;
   const featureMethod = featureDetails?.method;
-
-  useEffect(() => {
-    setHasHydratedFromDetails(false);
-  }, [editingFeatureId]);
 
   useEffect(() => {
     setActiveEditTab("service");
@@ -479,6 +487,10 @@ function CreateBlockPageContent() {
   }, [selectedMethod, isEditMode, featureDetails]);
 
   useEffect(() => {
+    hasHydratedFromDetailsRef.current = false;
+  }, [editingFeatureId]);
+
+  useEffect(() => {
     if (!isEditMode || !editingFeatureId) {
       setFeatureDetails(null);
       setFeatureDetailsError(null);
@@ -496,7 +508,7 @@ function CreateBlockPageContent() {
         }
         const details = response.data ?? null;
         setFeatureDetails(details);
-        if (details && !hasHydratedFromDetails) {
+        if (details && !hasHydratedFromDetailsRef.current) {
           setBlockName(details.name ?? "");
           setSelectedFeatureId(details.feature_id ?? null);
           setSelectedMethodId(details.method_id ?? null);
@@ -511,7 +523,7 @@ function CreateBlockPageContent() {
               ? extra.create_account_link
               : false;
           setAllowRegistrations(allowFlag);
-          setHasHydratedFromDetails(true);
+          hasHydratedFromDetailsRef.current = true;
         }
       } catch (error) {
         if (active) {
@@ -528,7 +540,7 @@ function CreateBlockPageContent() {
     return () => {
       active = false;
     };
-  }, [editingFeatureId, hasHydratedFromDetails, isEditMode]);
+  }, [editingFeatureId, isEditMode]);
 
   useEffect(() => {
     if (!isEditMode || !featureDetails || !selectedMethod?.method_services?.length) {
@@ -828,6 +840,10 @@ function CreateBlockPageContent() {
   ]);
 
   const goToNextStep = () => {
+    // Mark block name as touched when trying to proceed from step 1
+    if (step === 1) {
+      setBlockNameTouched(true);
+    }
     if (step === 2 && !validateServices(true)) {
       return;
     }
@@ -982,10 +998,12 @@ function CreateBlockPageContent() {
       if (isEditMode && editingFeatureId) {
         await FeaturesApi.update(editingFeatureId, payload);
         setSubmitSuccess("Block updated successfully.");
+        showToastSuccess("Block updated", `"${trimmedName}" saved successfully.`);
       } else {
         const response = await FeaturesApi.create(payload);
         const createdData = response?.data;
         setSubmitSuccess("Block created successfully.");
+        showToastSuccess("Block created", `"${trimmedName || "Block"}" saved successfully.`);
         // Store created feature data and move to Design & Code step
         if (createdData?.id) {
           setCreatedFeatureData({
@@ -998,7 +1016,9 @@ function CreateBlockPageContent() {
       }
       setSubmitError(null);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Unable to save block. Please try again.");
+      const message = error instanceof Error ? error.message : "Unable to save block. Please try again.";
+      setSubmitError(message);
+      showToastError("Failed to save block", message);
     } finally {
       setSubmitting(false);
     }
@@ -1354,10 +1374,11 @@ function CreateBlockPageContent() {
           type="text"
           value={blockName}
           onChange={(event) => setBlockName(event.target.value)}
+          onBlur={() => setBlockNameTouched(true)}
           placeholder="E.g. OTP Verification"
           className="mt-1 w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5] focus:outline-none"
         />
-        {nameError && <p className="text-xs text-[#b91c1c] mt-1">{nameError}</p>}
+        {blockNameTouched && nameError && <p className="text-xs text-[#b91c1c] mt-1">{nameError}</p>}
       </div>
       {methodsError && <p className="text-sm text-[#b91c1c]">{methodsError}</p>}
       {methodsLoading && <p className="text-sm text-[#5d6164]">Loading available services…</p>}
@@ -1365,17 +1386,174 @@ function CreateBlockPageContent() {
     </div>
   );
 
-  const renderServiceConfigurationSection = () => (
-    <div className="space-y-4">
-      <p className="text-sm text-[#5d6164]">
-        Configure the inputs and credentials required for the services bundled with this block.
-      </p>
-      {(selectedMethod?.method_services ?? []).map((service) => renderServiceCard(service))}
-      {!selectedMethod?.method_services?.length && (
-        <p className="text-sm text-[#5d6164]">No services available for the selected method.</p>
-      )}
-    </div>
-  );
+  const resetServiceFields = useCallback((serviceId: number) => {
+    const service = selectedMethod?.method_services?.find((s) => s.service_id === serviceId);
+    if (!service) return;
+    
+    setServiceState((prev) => ({
+      ...prev,
+      [serviceId]: {
+        ...prev[serviceId],
+        isEnabled: prev[serviceId]?.isEnabled ?? service.is_enable ?? false,
+        requirements: buildFieldGroupState(service.requirements as Record<string, FieldConfig>),
+        configurations: buildFieldGroupState(
+          (service.configurations as MethodServiceConfiguration | undefined)?.fields as Record<string, FieldConfig>
+        ),
+      },
+    }));
+  }, [selectedMethod?.method_services]);
+
+  const renderServiceFieldsPanel = (service: MethodService) => {
+    const formState = serviceState[service.service_id];
+    const requirements = service.requirements as Record<string, FieldConfig> | undefined;
+    const configurationFields = (service.configurations as MethodServiceConfiguration | undefined)?.fields as
+      | Record<string, FieldConfig>
+      | undefined;
+
+    const hasRequirements = requirements && Object.keys(requirements).length > 0;
+    const hasConfigurations = configurationFields && Object.keys(configurationFields).length > 0;
+    const isEnabled = formState?.isEnabled ?? false;
+
+    return (
+      <div className="space-y-6">
+        {/* Enable/Disable toggle - only in edit mode */}
+        {isEditMode && (
+          <div className="flex items-center justify-between rounded-2xl border border-[#e1e4e8] bg-[#f8f9fb] px-4 py-3">
+            <div className="space-y-0.5">
+              <p className="text-sm font-medium text-[#212528]">{service.name}</p>
+              <p className="text-xs text-[#5d6164]">
+                {isEnabled ? "This service is enabled" : "Enable this service to use it"}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isEnabled}
+              onClick={() =>
+                setServiceState((prev) => ({
+                  ...prev,
+                  [service.service_id]: {
+                    ...prev[service.service_id],
+                    isEnabled: !isEnabled,
+                    requirements: prev[service.service_id]?.requirements ?? {},
+                    configurations: prev[service.service_id]?.configurations ?? {},
+                  },
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3f51b5] focus-visible:ring-offset-2 ${
+                isEnabled ? "bg-[#3f51b5]" : "bg-[#d5d9dc]"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                  isEnabled ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        )}
+
+        {hasRequirements && (
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-[#212528]">Credentials</p>
+            <div className="space-y-4">
+              {Object.entries(requirements).map(([key, config]) =>
+                renderField(service.service_id, "requirements", key, config, formState?.requirements?.[key] ?? {
+                  value: "",
+                  chips: [],
+                  touched: false,
+                  error: null,
+                })
+              )}
+            </div>
+          </div>
+        )}
+        {hasConfigurations && (
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-[#212528]">Configurations</p>
+            <div className="space-y-4">
+              {Object.entries(configurationFields).map(([key, config]) =>
+                renderField(service.service_id, "configurations", key, config, formState?.configurations?.[key] ?? {
+                  value: "",
+                  chips: [],
+                  touched: false,
+                  error: null,
+                })
+              )}
+            </div>
+          </div>
+        )}
+        {!hasRequirements && !hasConfigurations && (
+          <p className="text-sm text-[#5d6164]">No configuration fields available for this service.</p>
+        )}
+        <button
+          type="button"
+          className="rounded-full border border-[#d5d9dc] px-4 py-2 text-sm text-[#5d6164] hover:bg-[#f4f5f7]"
+          onClick={() => resetServiceFields(service.service_id)}
+        >
+          Reset
+        </button>
+      </div>
+    );
+  };
+
+  const renderServiceConfigurationSection = () => {
+    const services = selectedMethod?.method_services ?? [];
+    const currentService = services.find((s) => s.service_id === selectedServiceId) ?? services[0];
+
+    if (!services.length) {
+      return (
+        <div className="space-y-4">
+          <p className="text-sm text-[#5d6164]">No services available for the selected method.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex gap-6">
+        {/* Left sidebar - Services list */}
+        <div className="w-56 shrink-0 space-y-1">
+          <p className="text-sm font-semibold text-[#212528] mb-3">Services</p>
+          {services.map((service) => {
+            const isActive = service.service_id === (selectedServiceId ?? services[0]?.service_id);
+            return (
+              <button
+                key={service.service_id}
+                type="button"
+                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+                  isActive
+                    ? "bg-[#3f51b5]/10 text-[#3f51b5] font-medium"
+                    : "text-[#5d6164] hover:bg-[#f4f5f7]"
+                }`}
+                onClick={() => setSelectedServiceId(service.service_id)}
+              >
+                <span>{service.name}</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={isActive ? "text-[#3f51b5]" : "text-[#c1c5c8]"}
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right panel - Service configuration */}
+        <div className="flex-1 border-l border-[#e1e4e8] pl-6">
+          {currentService && renderServiceFieldsPanel(currentService)}
+        </div>
+      </div>
+    );
+  };
 
   const renderPreviewInputFields = () => (
     <div className="space-y-3">
@@ -1889,13 +2067,13 @@ function CreateBlockPageContent() {
                 <div className="flex gap-3">
                   <Link
                     href="/app/features"
-                    className="rounded-full border border-[#d5d9dc] px-5 py-2 text-sm text-[#5d6164] hover:bg-[#f4f5f7]"
+                    className="rounded-full border border-[#d5d9dc] px-5 py-2 text-sm !text-[#5d6164] hover:bg-[#f4f5f7]"
                   >
                     Back to Blocks
                   </Link>
                   <Link
                     href={`/app/features/create?featureId=${createdFeatureData.id}`}
-                    className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold text-white hover:bg-[#303f9f]"
+                    className="rounded-full bg-[#3f51b5] px-6 py-2 text-sm font-semibold !text-white hover:bg-[#303f9f]"
                   >
                     Manage Block
                   </Link>
@@ -1905,8 +2083,8 @@ function CreateBlockPageContent() {
           </>
         )}
 
-        {submitError && <p className="text-sm text-[#b91c1c]">{submitError}</p>}
-        {submitSuccess && <p className="text-sm text-[#0f9d58]">{submitSuccess}</p>}
+        {/* {submitError && <p className="text-sm text-[#b91c1c]">{submitError}</p>} */}
+        {/* {submitSuccess && <p className="text-sm text-[#0f9d58]">{submitSuccess}</p>} */}
       </div>
     </div>
   );

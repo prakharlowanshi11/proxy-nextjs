@@ -94,6 +94,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const clientMenuRef = useRef<HTMLDivElement | null>(null);
+  const mobileClientMenuRef = useRef<HTMLDivElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [clientSettings, setClientSettings] = useState<ClientSettings | null>(null);
   const [refreshingSettings, setRefreshingSettings] = useState(false);
@@ -175,7 +176,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (clientMenuOpen && clientMenuRef.current && !clientMenuRef.current.contains(target)) {
+      const isInsideDesktopMenu = clientMenuRef.current && clientMenuRef.current.contains(target);
+      const isInsideMobileMenu = mobileClientMenuRef.current && mobileClientMenuRef.current.contains(target);
+      if (clientMenuOpen && !isInsideDesktopMenu && !isInsideMobileMenu) {
         setClientMenuOpen(false);
       }
       if (userMenuOpen && userMenuRef.current && !userMenuRef.current.contains(target)) {
@@ -406,17 +409,115 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             isCollapsed ? "w-[76px]" : "w-[264px]"
           }`}
         >
-          {/* <div className="flex items-center gap-2 px-5 py-4 border-b border-[#e1e4e8]">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(63,81,181,0.12)] text-[#3f51b5] font-semibold">
-              SA
-            </span>
-            {!isCollapsed && (
-              <div className="flex flex-col">
-                <p className="text-sm font-semibold text-[#212528]">SAAR Console</p>
-                <p className="text-xs text-[#5d6164]">Proxy Management</p>
+          {/* Sidebar Header with Client Selector and Collapse Toggle */}
+          <div className="shrink-0 px-3 py-4 border-b border-[#e1e4e8]">
+            <div className={`flex items-center ${isCollapsed ? "justify-center" : "justify-between"} gap-2`}>
+              {/* Client Selector */}
+              <div className={`relative ${isCollapsed ? "" : "flex-1"}`} ref={clientMenuRef}>
+                <button
+                  onClick={() => setClientMenuOpen((prev) => !prev)}
+                  className={`inline-flex items-center gap-2 rounded-xl px-2 py-2 text-sm font-medium hover:bg-[rgba(63,81,181,0.08)] transition-colors ${
+                    isCollapsed ? "justify-center" : "w-full"
+                  }`}
+                  disabled={clientsLoading && clientsList.length === 0}
+                >
+                  <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[rgba(63,81,181,0.12)] text-[#3f51b5] font-semibold text-sm">
+                    {(activeClient?.name ?? "S")[0]}
+                  </span>
+                  {!isCollapsed && (
+                    <>
+                      <span className="flex-1 text-left text-[#212528] truncate">
+                        {activeClient?.name ?? (clientsLoading ? "Loading..." : "Select Client")}
+                      </span>
+                      <svg width="14" height="14" viewBox="0 0 24 24" className="shrink-0 text-[#5d6164]">
+                        <path
+                          d="m6 9 6 6 6-6"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          fill="none"
+                        />
+                      </svg>
+                    </>
+                  )}
+                </button>
+                {clientMenuOpen && (
+                  <div className={`absolute z-20 mt-2 max-h-80 overflow-auto rounded-2xl border border-[#e1e4e8] bg-white p-2 shadow-lg space-y-1 ${
+                    isCollapsed ? "left-full ml-2 w-56" : "left-0 right-0"
+                  }`}>
+                    {clientsError && (
+                      <p className="px-3 py-2 text-xs text-red-600 bg-red-50 rounded-xl">{clientsError}</p>
+                    )}
+                    {clientsList.map((client) => (
+                      <button
+                        key={client.id}
+                        className={`flex w-full justify-between rounded-xl px-3 py-2 text-left text-sm ${
+                          client.id === activeClient?.id
+                            ? "bg-[rgba(63,81,181,0.12)] text-[#3f51b5]"
+                            : "hover:bg-[rgba(63,81,181,0.05)]"
+                        }`}
+                        onClick={() => handleClientSwitch(client)}
+                        disabled={switchingClientId === client.id}
+                      >
+                        <span>{client.name}</span>
+                        {client.id === activeClient?.id && <span className="text-xs font-semibold">Active</span>}
+                        {switchingClientId === client.id && (
+                          <span className="text-xs text-[#5d6164]">Switching...</span>
+                        )}
+                      </button>
+                    ))}
+                    {hasMoreClients && (
+                      <button
+                        className="w-full rounded-xl border border-dashed border-[#d5d9dc] px-3 py-2 text-sm text-[#3f51b5]"
+                        onClick={() => loadClients(clientsPageMeta.pageNumber + 1)}
+                        disabled={clientsLoading}
+                      >
+                        {clientsLoading ? "Loading..." : "Load more"}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
+              {/* Collapse/Expand Toggle */}
+              {!isCollapsed && (
+                <button
+                  className="inline-flex items-center justify-center rounded-lg p-1.5 text-[#5d6164] hover:bg-[rgba(63,81,181,0.08)] hover:text-[#3f51b5] transition-colors"
+                  onClick={() => setIsCollapsed(true)}
+                  title="Collapse sidebar"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24">
+                    <path
+                      d="m16 6-6 6 6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {isCollapsed && (
+              <button
+                className="mt-2 w-full inline-flex items-center justify-center rounded-lg p-1.5 text-[#5d6164] hover:bg-[rgba(63,81,181,0.08)] hover:text-[#3f51b5] transition-colors"
+                onClick={() => setIsCollapsed(false)}
+                title="Expand sidebar"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24">
+                  <path
+                    d="m8 6 6 6-6 6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
             )}
-          </div> */}
+          </div>
           <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-1">
             {navItems.map((item) => {
               const isActive = pathname.startsWith(item.href);
@@ -426,8 +527,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   href={item.href}
                   className={`flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
                     isActive
-                      ? "bg-[#3f51b5] text-white shadow-sm"
-                      : "text-[#5d6164] hover:bg-[rgba(63,81,181,0.08)] hover:text-[#3f51b5]"
+                      ? "bg-[#3f51b5] !text-white shadow-sm"
+                      : "!text-[#5d6164] hover:bg-[rgba(63,81,181,0.08)] hover:!text-[#3f51b5]"
                   }`}
                   title={item.label}
                 >
@@ -489,59 +590,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </aside>
 
         <div className="flex-1 flex flex-col">
-          <header className="flex flex-wrap items-center gap-4 border-b border-[#e1e4e8] bg-white px-6 py-4">
+          {/* Mobile Header - only visible on small screens */}
+          <header className="md:hidden flex items-center gap-4 border-b border-[#e1e4e8] bg-white px-4 py-3">
             <button
-              className="md:hidden inline-flex items-center gap-2 rounded-full border border-[#d5d9dc] px-3 py-2 text-sm"
+              className="inline-flex items-center gap-2 rounded-full border border-[#d5d9dc] px-3 py-2 text-sm"
               onClick={() => setIsCollapsed((prev) => !prev)}
             >
-              Menu
-              <svg width="14" height="14" viewBox="0 0 24 24" className="text-[#3f51b5]">
+              <svg width="18" height="18" viewBox="0 0 24 24" className="text-[#3f51b5]">
                 <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
               </svg>
             </button>
-            <div className="hidden md:block">
-              <button
-                className="inline-flex items-center justify-center rounded-full border border-[#d5d9dc] p-2 text-[#3f51b5] hover:border-[#3f51b5]"
-                onClick={() => setIsCollapsed((prev) => !prev)}
-              >
-                {isCollapsed ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24">
-                    <path
-                      d="m8 6 6 6-6 6"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24">
-                    <path
-                      d="m16 6-6 6 6 6"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </button>
-            </div>
-            <div className="relative" ref={clientMenuRef}>
+            <div className="relative flex-1" ref={mobileClientMenuRef}>
               <button
                 onClick={() => setClientMenuOpen((prev) => !prev)}
-                className="inline-flex items-center gap-2 rounded-full border border-[#d5d9dc] px-4 py-2 text-sm font-medium hover:border-[#3f51b5]"
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium hover:bg-[rgba(63,81,181,0.08)]"
                 disabled={clientsLoading && clientsList.length === 0}
               >
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(63,81,181,0.12)] text-[#3f51b5] font-semibold">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[rgba(63,81,181,0.12)] text-[#3f51b5] font-semibold text-xs">
                   {(activeClient?.name ?? "S")[0]}
                 </span>
-                <span className="text-[#212528]">
-                  {activeClient?.name ?? (clientsLoading ? "Loading clients..." : "Clients")}
+                <span className="text-[#212528] truncate">
+                  {activeClient?.name ?? (clientsLoading ? "Loading..." : "Select")}
                 </span>
-                <svg width="14" height="14" viewBox="0 0 24 24">
+                <svg width="14" height="14" viewBox="0 0 24 24" className="shrink-0">
                   <path
                     d="m6 9 6 6 6-6"
                     stroke="currentColor"
@@ -553,7 +624,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </svg>
               </button>
               {clientMenuOpen && (
-                <div className="absolute z-20 mt-2 max-h-80 w-64 overflow-auto rounded-2xl border border-[#e1e4e8] bg-white p-2 shadow-lg space-y-2">
+                <div className="absolute z-20 mt-2 left-0 max-h-80 w-64 overflow-auto rounded-2xl border border-[#e1e4e8] bg-white p-2 shadow-lg space-y-1">
                   {clientsError && (
                     <p className="px-3 py-2 text-xs text-red-600 bg-red-50 rounded-xl">{clientsError}</p>
                   )}
@@ -587,19 +658,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </div>
               )}
             </div>
-            <div className="ml-auto flex items-center gap-3">
-              <span className="hidden md:block text-xs text-[#5d6164]">
-                {new Date().toLocaleString("en-IN", {
-                  weekday: "short",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
-            </div>
           </header>
-          <main className="flex-1 overflow-y-auto bg-app-surface p-4 md:p-6">
+          <main className={`flex-1 overflow-y-auto bg-app-surface ${showChatbot ? "p-0" : "p-4 md:p-6"}`}>
             <div key={clientId ?? "no-client"} className={showChatbot ? "hidden" : "min-h-full"}>{children}</div>
-            <div id="ChatbotContainer" className={showChatbot ? "min-h-[60vh]" : "hidden"} />
+            <div id="ChatbotContainer" className={showChatbot ? "h-full w-full" : "hidden"} />
           </main>
         </div>
         </div>

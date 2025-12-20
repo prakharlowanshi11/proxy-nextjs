@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { DM_Sans } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/context/toast";
 
-const inter = Inter({
+const dmSans = DM_Sans({
   subsets: ["latin"],
   variable: "--font-sans",
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -20,8 +22,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} antialiased bg-app-surface text-body`}>
-        {children}
+      <body className={`${dmSans.variable} proxy-console antialiased bg-app-surface text-body`}>
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

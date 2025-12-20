@@ -11,41 +11,65 @@ export default function ChatbotPage() {
   }
 
   return (
-    <div className="app-card space-y-4 p-6">
-      <div className="space-y-1">
-        <p className="text-xs font-semibold uppercase text-[#5d6164]">Ask AI</p>
-        <h2 className="text-2xl font-semibold text-[#212528]">Launching assistant</h2>
-        <p className="text-sm text-[#5d6164]">
-          The SAAR assistant mirrors the Angular experience. We open the embedded bridge inside the same container so
-          you can chat with contextual data about logs, features, and onboarding flows.
-        </p>
-      </div>
-      {status === "loading" && (
-        <div className="rounded-2xl border border-dashed border-[#d5d9dc] bg-[#f8f9fb] px-4 py-3 text-sm text-[#5d6164]">
-          Preparing a secure session…
+    <div className="flex h-screen items-center justify-center">
+      <div className="w-full max-w-lg space-y-6 text-center">
+        {/* Animated AI Icon */}
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-[#3f51b5] to-[#7986cb] shadow-lg">
+          <svg
+            width="40"
+            height="40"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={status === "loading" ? "animate-pulse" : ""}
+          >
+            <path d="M12 3a9 9 0 0 0-9 9 8.86 8.86 0 0 0 3.41 6.95V21l3.1-1.48A9.93 9.93 0 0 0 12 21a9 9 0 0 0 0-18Z" />
+            <circle cx="9" cy="11" r="1" fill="white" stroke="none" />
+            <circle cx="12" cy="11" r="1" fill="white" stroke="none" />
+            <circle cx="15" cy="11" r="1" fill="white" stroke="none" />
+          </svg>
         </div>
-      )}
-      {status === "idle" && (
-        <div className="rounded-2xl border border-dashed border-[#d5d9dc] bg-[#f8f9fb] px-4 py-3 text-sm text-[#5d6164]">
-          Sit tight while we finalise authentication for the assistant.
+
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold text-[#212528]">
+            {status === "loading" ? "Starting AI Assistant..." : status === "error" ? "Connection Failed" : "Initializing..."}
+          </h2>
+          <p className="text-sm text-[#5d6164]">
+            {status === "error"
+              ? "We couldn't connect to the AI assistant. Please try again."
+              : "Setting up a secure connection to your AI assistant."}
+          </p>
         </div>
-      )}
-      {status === "error" && (
-        <div className="space-y-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-[#b91c1c]">
-          <p>{error ?? "Unable to load the assistant."}</p>
+
+        {(status === "loading" || status === "idle") && (
+          <div className="flex justify-center gap-1.5">
+            <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#3f51b5]" style={{ animationDelay: "0ms" }} />
+            <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#3f51b5]" style={{ animationDelay: "150ms" }} />
+            <span className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#3f51b5]" style={{ animationDelay: "300ms" }} />
+          </div>
+        )}
+
+        {status === "error" && (
           <button
             type="button"
             onClick={retry}
-            className="inline-flex items-center gap-2 rounded-full border border-[#b91c1c] px-4 py-2 text-xs font-semibold text-[#b91c1c] hover:bg-[#b91c1c]/5"
+            className="inline-flex items-center gap-2 rounded-full bg-[#3f51b5] px-6 py-3 text-sm font-semibold text-white shadow-md hover:bg-[#303f9f] transition-colors"
           >
-            Retry
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12a9 9 0 1 1-9-9" />
+              <polyline points="21 3 21 9 15 9" />
+            </svg>
+            Try Again
           </button>
-        </div>
-      )}
-      <p className="text-xs text-[#8f9396]">
-        Once the bridge finishes loading, the assistant appears in the dedicated panel, matching the Angular console
-        flow.
-      </p>
+        )}
+
+        <p className="text-xs text-[#8f9396]">
+          The assistant helps you explore logs, manage features, and understand your data.
+        </p>
+      </div>
     </div>
   );
 }

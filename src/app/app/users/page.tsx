@@ -4,6 +4,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import type { ClientPermission, ClientRole, FeatureDetails, FeatureEntity, UserEntity } from "@/lib/api";
 import { FeaturesApi, UsersApi } from "@/lib/api";
 import { useClientSettings } from "@/context/client-settings";
+import { useToast } from "@/context/toast";
 
 const dateRanges = [
   { id: "currentMonth", label: "Current Month" },
@@ -51,6 +52,9 @@ const getDateRangeForApi = (rangeId: string) => {
 
 const DEFAULT_PAGE_META = { pageNumber: 1, totalPages: 1, totalItems: 0 };
 
+const getErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+
 type RoleRecord = ClientRole & {
   c_permissions?: Array<{ id: number; name: string }>;
   feature_configuration_id?: number | null;
@@ -72,12 +76,14 @@ type RoleFormState = {
 type PermissionFormState = {
   id: number | null;
   name: string;
+  description: string;
 };
 
 type ManagementTab = "roles" | "permissions" | "settings";
 
 export default function UsersPage() {
   const { clientId } = useClientSettings();
+  const { success: showToastSuccess, error: showToastError } = useToast();
   const [activeTab, setActiveTab] = useState<"users" | "management">("users");
   const [search, setSearch] = useState("");
   const [company, setCompany] = useState("");
@@ -106,7 +112,6 @@ export default function UsersPage() {
   const [rolesPage, setRolesPage] = useState(1);
   const [rolesPageSize, setRolesPageSize] = useState(25);
   const [roleActionId, setRoleActionId] = useState<number | null>(null);
-  const [roleMessage, setRoleMessage] = useState<string | null>(null);
 
   const [permissions, setPermissions] = useState<PermissionRecord[]>([]);
   const [permissionsLoading, setPermissionsLoading] = useState(false);
@@ -116,7 +121,6 @@ export default function UsersPage() {
   const [permissionsPage, setPermissionsPage] = useState(1);
   const [permissionsPageSize, setPermissionsPageSize] = useState(25);
   const [permissionActionId, setPermissionActionId] = useState<number | null>(null);
-  const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const [permissionOptions, setPermissionOptions] = useState<PermissionRecord[]>([]);
 
   const [roleModalOpen, setRoleModalOpen] = useState(false);
@@ -133,14 +137,13 @@ export default function UsersPage() {
 
   const [permissionModalOpen, setPermissionModalOpen] = useState(false);
   const [permissionModalMode, setPermissionModalMode] = useState<"create" | "edit">("create");
-  const [permissionFormState, setPermissionFormState] = useState<PermissionFormState>({ id: null, name: "" });
+  const [permissionFormState, setPermissionFormState] = useState<PermissionFormState>({ id: null, name: "", description: "" });
   const [permissionModalError, setPermissionModalError] = useState<string | null>(null);
   const [permissionSubmitting, setPermissionSubmitting] = useState(false);
 
   const [featureDetails, setFeatureDetails] = useState<FeatureDetails | null>(null);
   const [defaultRoles, setDefaultRoles] = useState({ creator: "", member: "" });
   const [defaultRolesSaving, setDefaultRolesSaving] = useState(false);
-  const [defaultRolesMessage, setDefaultRolesMessage] = useState<string | null>(null);
   const [defaultRolesError, setDefaultRolesError] = useState<string | null>(null);
 
   const managementFeatures = useMemo(
@@ -173,13 +176,15 @@ export default function UsersPage() {
       });
     } catch (error) {
       console.error("Failed to fetch users", error);
-      setUsersError(error instanceof Error ? error.message : "Unable to fetch users");
+      const message = getErrorMessage(error, "Unable to fetch users");
+      setUsersError(message);
       setUsers([]);
       setUserPagination({ pageNumber: 1, totalPages: 1, totalItems: 0 });
+      showToastError("Failed to fetch users", message);
     } finally {
       setUsersLoading(false);
     }
-  }, [company, dateRange, featureFilter, pageIndex, pageSize, search, clientId]);
+  }, [company, dateRange, featureFilter, pageIndex, pageSize, search, clientId, showToastError]);
 
   const fetchFeatures = useCallback(async () => {
     setFeaturesLoading(true);
@@ -190,10 +195,11 @@ export default function UsersPage() {
     } catch (error) {
       console.error("Failed to fetch features", error);
       setFeatures([]);
+      showToastError("Failed to fetch blocks", getErrorMessage(error, "Unable to fetch blocks"));
     } finally {
       setFeaturesLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, showToastError]);
 
   const loadRoles = useCallback(async () => {
     if (!managementFeatureRef) {
@@ -222,13 +228,15 @@ export default function UsersPage() {
       });
     } catch (error) {
       console.error("Failed to fetch roles", error);
-      setRolesError(error instanceof Error ? error.message : "Unable to load roles");
+      const message = getErrorMessage(error, "Unable to load roles");
+      setRolesError(message);
       setRoles([]);
       setRolesPageMeta(DEFAULT_PAGE_META);
+      showToastError("Failed to fetch roles", message);
     } finally {
       setRolesLoading(false);
     }
-  }, [managementFeatureRef, rolesPage, rolesPageSize, rolesSearch]);
+  }, [managementFeatureRef, rolesPage, rolesPageSize, rolesSearch, showToastError]);
 
   const loadPermissions = useCallback(async () => {
     if (!managementFeatureRef) {
@@ -257,13 +265,15 @@ export default function UsersPage() {
       });
     } catch (error) {
       console.error("Failed to fetch permissions", error);
-      setPermissionsError(error instanceof Error ? error.message : "Unable to load permissions");
+      const message = getErrorMessage(error, "Unable to load permissions");
+      setPermissionsError(message);
       setPermissions([]);
       setPermissionsPageMeta(DEFAULT_PAGE_META);
+      showToastError("Failed to fetch permissions", message);
     } finally {
       setPermissionsLoading(false);
     }
-  }, [managementFeatureRef, permissionsPage, permissionsPageSize, permissionsSearch]);
+  }, [managementFeatureRef, permissionsPage, permissionsPageSize, permissionsSearch, showToastError]);
 
   const refreshPermissionOptions = useCallback(async () => {
     if (!managementFeatureRef) {
@@ -275,8 +285,9 @@ export default function UsersPage() {
       setPermissionOptions((response.data?.data as PermissionRecord[]) ?? []);
     } catch (error) {
       console.error("Failed to fetch permission options", error);
+      showToastError("Failed to fetch permissions list", getErrorMessage(error, "Unable to load permissions"));
     }
-  }, [managementFeatureRef]);
+  }, [managementFeatureRef, showToastError]);
 
   const refreshFeatureDetails = useCallback(async () => {
     if (!managementFeatureId) {
@@ -299,8 +310,9 @@ export default function UsersPage() {
       console.error("Failed to fetch block details", error);
       setFeatureDetails(null);
       setDefaultRoles({ creator: "", member: "" });
+      showToastError("Failed to fetch block details", getErrorMessage(error, "Unable to fetch block details"));
     }
-  }, [managementFeatureId]);
+  }, [managementFeatureId, showToastError]);
 
   useEffect(() => {
     fetchUsers();
@@ -358,8 +370,6 @@ export default function UsersPage() {
     setPermissionsPage(1);
     setRolesSearch("");
     setPermissionsSearch("");
-    setRoleMessage(null);
-    setPermissionMessage(null);
   };
 
   const openCreateRoleModal = () => {
@@ -401,10 +411,10 @@ export default function UsersPage() {
       };
       if (roleModalMode === "create") {
         await UsersApi.createRole(managementFeatureRef, payload);
-        setRoleMessage(`Role "${payload.name}" created.`);
+        showToastSuccess("Role created", `Role "${payload.name}" has been created.`);
       } else if (roleFormState.id !== null) {
         await UsersApi.updateRole(managementFeatureRef, roleFormState.id, payload);
-        setRoleMessage(`Role "${payload.name}" updated.`);
+        showToastSuccess("Role updated", `Role "${payload.name}" has been updated.`);
       }
       setRoleModalOpen(false);
       setRoleFormState({ id: null, name: "", description: "", permissions: [], is_default: false });
@@ -412,7 +422,9 @@ export default function UsersPage() {
       await refreshFeatureDetails();
     } catch (error) {
       console.error("Failed to save role", error);
-      setRoleModalError(error instanceof Error ? error.message : "Unable to save role");
+      const message = getErrorMessage(error, "Unable to save role");
+      setRoleModalError(message);
+      showToastError("Failed to save role", message);
     } finally {
       setRoleSubmitting(false);
     }
@@ -429,12 +441,14 @@ export default function UsersPage() {
     setRoleActionId(role.id);
     try {
       await UsersApi.deleteRole(managementFeatureRef, role.id);
-      setRoleMessage(`Role "${role.name}" deleted.`);
+      showToastSuccess("Role deleted", `Role "${role.name}" has been deleted.`);
       await loadRoles();
       await refreshFeatureDetails();
     } catch (error) {
       console.error("Failed to delete role", error);
-      setRolesError(error instanceof Error ? error.message : "Unable to delete role");
+      const message = getErrorMessage(error, "Unable to delete role");
+      setRolesError(message);
+      showToastError("Failed to delete role", message);
     } finally {
       setRoleActionId(null);
     }
@@ -442,14 +456,14 @@ export default function UsersPage() {
 
   const openCreatePermissionModal = () => {
     setPermissionModalMode("create");
-    setPermissionFormState({ id: null, name: "" });
+    setPermissionFormState({ id: null, name: "", description: "" });
     setPermissionModalError(null);
     setPermissionModalOpen(true);
   };
 
   const openEditPermissionModal = (permission: PermissionRecord) => {
     setPermissionModalMode("edit");
-    setPermissionFormState({ id: permission.id, name: permission.name });
+    setPermissionFormState({ id: permission.id, name: permission.name, description: permission.description ?? "" });
     setPermissionModalError(null);
     setPermissionModalOpen(true);
   };
@@ -465,21 +479,23 @@ export default function UsersPage() {
     }
     setPermissionSubmitting(true);
     try {
-      const payload = { name: permissionFormState.name.trim() };
+      const payload = { name: permissionFormState.name.trim(), description: permissionFormState.description.trim() };
       if (permissionModalMode === "create") {
         await UsersApi.createPermission(managementFeatureRef, payload);
-        setPermissionMessage(`Permission "${payload.name}" created.`);
+        showToastSuccess("Permission created", `Permission "${payload.name}" has been created.`);
       } else if (permissionFormState.id !== null) {
         await UsersApi.updatePermission(managementFeatureRef, permissionFormState.id, payload);
-        setPermissionMessage(`Permission "${payload.name}" updated.`);
+        showToastSuccess("Permission updated", `Permission "${payload.name}" has been updated.`);
       }
       setPermissionModalOpen(false);
-      setPermissionFormState({ id: null, name: "" });
+      setPermissionFormState({ id: null, name: "", description: "" });
       await loadPermissions();
       await refreshPermissionOptions();
     } catch (error) {
       console.error("Failed to save permission", error);
-      setPermissionModalError(error instanceof Error ? error.message : "Unable to save permission");
+      const message = getErrorMessage(error, "Unable to save permission");
+      setPermissionModalError(message);
+      showToastError("Failed to save permission", message);
     } finally {
       setPermissionSubmitting(false);
     }
@@ -496,12 +512,14 @@ export default function UsersPage() {
     setPermissionActionId(permission.id);
     try {
       await UsersApi.deletePermission(managementFeatureRef, permission.id);
-      setPermissionMessage(`Permission "${permission.name}" deleted.`);
+      showToastSuccess("Permission deleted", `Permission "${permission.name}" has been deleted.`);
       await loadPermissions();
       await refreshPermissionOptions();
     } catch (error) {
       console.error("Failed to delete permission", error);
-      setPermissionsError(error instanceof Error ? error.message : "Unable to delete permission");
+      const message = getErrorMessage(error, "Unable to delete permission");
+      setPermissionsError(message);
+      showToastError("Failed to delete permission", message);
     } finally {
       setPermissionActionId(null);
     }
@@ -509,11 +527,15 @@ export default function UsersPage() {
 
   const saveDefaultRoles = async () => {
     if (!managementFeatureId) {
-      setDefaultRolesError("Unable to resolve block identifier.");
+      const message = "Unable to resolve block identifier.";
+      setDefaultRolesError(message);
+      showToastError("Failed to save default roles", message);
       return;
     }
     if (!defaultRoles.creator || !defaultRoles.member) {
-      setDefaultRolesError("Select default roles for creator and member.");
+      const message = "Select default roles for creator and member.";
+      setDefaultRolesError(message);
+      showToastError("Failed to save default roles", message);
       return;
     }
     setDefaultRolesSaving(true);
@@ -532,11 +554,13 @@ export default function UsersPage() {
         },
       };
       await FeaturesApi.update(managementFeatureId, payload);
-      setDefaultRolesMessage("Default roles updated.");
+      showToastSuccess("Default roles updated", "Default role preferences saved.");
       await refreshFeatureDetails();
     } catch (error) {
       console.error("Failed to save default roles", error);
-      setDefaultRolesError(error instanceof Error ? error.message : "Unable to save default roles");
+      const message = getErrorMessage(error, "Unable to save default roles");
+      setDefaultRolesError(message);
+      showToastError("Failed to save default roles", message);
     } finally {
       setDefaultRolesSaving(false);
     }
@@ -758,7 +782,6 @@ export default function UsersPage() {
           </button>
         </div>
       </div>
-      {roleMessage && <p className="text-xs text-[#0f9d58]">{roleMessage}</p>}
       {rolesError && <p className="text-xs text-[#b91c1c]">{rolesError}</p>}
       <div className="table-scroll">
         <table className="default-table">
@@ -903,7 +926,6 @@ export default function UsersPage() {
           </button>
         </div>
       </div>
-      {permissionMessage && <p className="text-xs text-[#0f9d58]">{permissionMessage}</p>}
       {permissionsError && <p className="text-xs text-[#b91c1c]">{permissionsError}</p>}
       <div className="table-scroll">
         <table className="default-table">
@@ -1007,9 +1029,8 @@ export default function UsersPage() {
       <p className="text-sm text-[#5d6164]">
         Choose the default roles that creators and members receive automatically.
       </p>
-      {defaultRolesMessage && <p className="text-xs text-[#0f9d58]">{defaultRolesMessage}</p>}
       {defaultRolesError && <p className="text-xs text-[#b91c1c]">{defaultRolesError}</p>}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="flex flex-col gap-4">
         <div className="space-y-2">
           <label className="text-xs font-semibold text-[#5d6164]">Default role for creator</label>
           <select
@@ -1060,7 +1081,6 @@ export default function UsersPage() {
               creator: cRoles?.default_creator_role ? String(cRoles.default_creator_role) : "",
               member: cRoles?.default_member_role ? String(cRoles.default_member_role) : "",
             });
-            setDefaultRolesMessage(null);
             setDefaultRolesError(null);
           }}
         >
@@ -1165,24 +1185,38 @@ export default function UsersPage() {
           </div>
           <div className="space-y-1">
             <label className="text-xs font-semibold text-[#5d6164]">Permissions</label>
-            <select
-              multiple
-              value={roleFormState.permissions}
-              onChange={(event) =>
-                setRoleFormState((prev) => ({
-                  ...prev,
-                  permissions: Array.from(event.target.selectedOptions).map((option) => option.value),
-                }))
-              }
-              className="h-32 w-full rounded-2xl border border-[#d5d9dc] px-2 py-2 text-sm focus:border-[#3f51b5]"
-            >
-              {permissionOptions.map((permission) => (
-                <option key={permission.id} value={permission.name}>
-                  {permission.name}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-[#8f9396]">Hold Cmd/Ctrl to select multiple permissions.</p>
+            <div className="max-h-40 overflow-y-auto rounded-2xl border border-[#d5d9dc] p-2">
+              {permissionOptions.length === 0 ? (
+                <p className="px-2 py-1 text-sm text-[#8f9396]">No permissions available</p>
+              ) : (
+                permissionOptions.map((permission) => (
+                  <label
+                    key={permission.id}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-[#f5f6f7]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={roleFormState.permissions.includes(permission.name)}
+                      onChange={(event) => {
+                        setRoleFormState((prev) => ({
+                          ...prev,
+                          permissions: event.target.checked
+                            ? [...prev.permissions, permission.name]
+                            : prev.permissions.filter((p) => p !== permission.name),
+                        }));
+                      }}
+                      className="h-4 w-4 rounded border-[#d5d9dc] text-[#3f51b5] focus:ring-[#3f51b5]"
+                    />
+                    <span className="text-sm text-[#212528]">{permission.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+            {roleFormState.permissions.length > 0 && (
+              <p className="text-xs text-[#8f9396]">
+                {roleFormState.permissions.length} permission{roleFormState.permissions.length !== 1 ? 's' : ''} selected
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <label className="text-xs font-semibold text-[#5d6164]">Description</label>
@@ -1194,7 +1228,7 @@ export default function UsersPage() {
               placeholder="Optional description"
             />
           </div>
-          <label className="inline-flex items-center gap-2 text-xs text-[#5d6164]">
+          {/* <label className="inline-flex items-center gap-2 text-xs text-[#5d6164]">
             <input
               type="checkbox"
               checked={roleFormState.is_default}
@@ -1202,7 +1236,7 @@ export default function UsersPage() {
               className="h-4 w-4 rounded border-[#d5d9dc]"
             />
             Set as default role
-          </label>
+          </label> */}
         </div>
       </Modal>
 
@@ -1239,6 +1273,16 @@ export default function UsersPage() {
               onChange={(event) => setPermissionFormState((prev) => ({ ...prev, name: event.target.value }))}
               className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5]"
               placeholder="Enter permission name"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-[#5d6164]">Description</label>
+            <textarea
+              value={permissionFormState.description}
+              onChange={(event) => setPermissionFormState((prev) => ({ ...prev, description: event.target.value }))}
+              rows={3}
+              className="w-full rounded-2xl border border-[#d5d9dc] px-4 py-2 text-sm focus:border-[#3f51b5]"
+              placeholder="Optional description"
             />
           </div>
         </div>
